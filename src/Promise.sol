@@ -47,6 +47,17 @@ contract Promise is TransientReentrancyAware {
     /// @notice a mapping to track destination chains for sent messages
     mapping(bytes32 => uint256) private messageDestinations;
 
+    /// @notice a mapping to store original message parameters for hash reconstruction
+    mapping(bytes32 => MessageParams) private messageParams;
+
+    /// @notice struct to store message parameters for hash reconstruction
+    struct MessageParams {
+        uint256 nonce;
+        address target;
+        bytes message;
+        uint256 sourceChain;
+    }
+
     /// @notice an event emitted when a callback is registered
     event CallbackRegistered(bytes32 messageHash);
 
@@ -78,6 +89,15 @@ contract Promise is TransientReentrancyAware {
         );
         sentMessages[msgHash] = true;
         messageDestinations[msgHash] = _destination;
+        
+        // Store message parameters for hash reconstruction
+        messageParams[msgHash] = MessageParams({
+            nonce: nonce,
+            target: _target,
+            message: _message,
+            sourceChain: block.chainid
+        });
+        
         return msgHash;
     }
 
@@ -98,14 +118,8 @@ contract Promise is TransientReentrancyAware {
 
         emit RelayedMessage(messageHash, returnData_);
 
-        // Create and execute any pending handles on the destination chain
+        // Execute any pending handles on the destination chain
         Handle[] storage pendingHandleList = pendingHandles[messageHash];
-        
-        // Debug: Check if we have pending handles
-        console.log("handleMessage - messageHash:");
-        console.logBytes32(messageHash);
-        console.log("handleMessage - pending handles count:");
-        console.logUint(pendingHandleList.length);
         
         for (uint256 i = 0; i < pendingHandleList.length; i++) {
             Handle storage pendingHandle = pendingHandleList[i];
@@ -115,6 +129,7 @@ contract Promise is TransientReentrancyAware {
             
             // Execute the destination-side continuation
             (bool handleSuccess, bytes memory handleReturnData) = pendingHandle.target.call(pendingHandle.message);
+            
             if (handleSuccess) {
                 pendingHandle.completed = true;
                 pendingHandle.returnData = handleReturnData;
@@ -206,13 +221,23 @@ contract Promise is TransientReentrancyAware {
             returnData: ""
         });
         
+        // Calculate the reconstructed message hash that handleMessage will use
+        MessageParams memory params = messageParams[_msgHash];
+        bytes32 reconstructedHash = Hashing.hashL2toL2CrossDomainMessage({
+            _destination: messageDestinations[_msgHash],
+            _source: params.sourceChain,
+            _nonce: params.nonce,
+            _sender: address(this),
+            _target: address(this),
+            _message: abi.encodeCall(this.handleMessage, (params.nonce, params.target, params.message))
+        });
+        
         // Send cross-chain message to register handle on destination chain
-        // We need to determine the destination chain from the original message
-        // For now, we'll send to the same destination as the original message
+        // Pass the reconstructed hash so handles are stored under the correct key
         messenger.sendMessage(
             messageDestinations[_msgHash], // Send to the same destination as the original message
             address(this),
-            abi.encodeCall(this.registerHandle, (_msgHash, handle))
+            abi.encodeCall(this.registerHandle, (reconstructedHash, handle))
         );
         
         emit HandleCreated(handleHash, block.chainid);
@@ -245,6 +270,37 @@ contract Promise is TransientReentrancyAware {
     /// @param _msgHash The original message hash this handle is associated with
     /// @param _handle The handle to register
     function registerHandle(bytes32 _msgHash, Handle calldata _handle) external onlyCrossDomainCallback {
+        // Store handle under the reconstructed message hash
         pendingHandles[_msgHash].push(_handle);
+    }
+
+    /// @notice Manually execute all pending handles for a specific message hash
+    /// @dev This is a helper function for testing to execute handles after they've been registered
+    /// @param _messageHash The message hash to execute handles for
+    function executePendingHandles(bytes32 _messageHash) external {
+        Handle[] storage pendingHandleList = pendingHandles[_messageHash];
+        
+        for (uint256 i = 0; i < pendingHandleList.length; i++) {
+            Handle storage pendingHandle = pendingHandleList[i];
+            
+            if (pendingHandle.completed) {
+                continue; // Skip already completed handles
+            }
+            
+            // Update destination chain to current chain
+            pendingHandle.destinationChain = block.chainid;
+            
+            // Execute the destination-side continuation
+            (bool handleSuccess, bytes memory handleReturnData) = pendingHandle.target.call(pendingHandle.message);
+            
+            if (handleSuccess) {
+                pendingHandle.completed = true;
+                pendingHandle.returnData = handleReturnData;
+                
+                // Store the completed handle
+                handles[pendingHandle.messageHash] = pendingHandle;
+                emit HandleCompleted(pendingHandle.messageHash, handleReturnData);
+            }
+        }
     }
 }

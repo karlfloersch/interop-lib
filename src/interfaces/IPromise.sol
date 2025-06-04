@@ -77,6 +77,11 @@ interface IPromise {
     /// @return handles Array of pending handles
     function getPendingHandles(bytes32 _msgHash) external view returns (Handle[] memory);
 
+    /// @notice Manually execute all pending handles for a specific message hash
+    /// @dev This is a helper function for testing to execute handles after they've been registered
+    /// @param _messageHash The message hash to execute handles for
+    function executePendingHandles(bytes32 _messageHash) external;
+
     /// @notice invoke continuations present on the completion of a remote message. for now this requires all
     ///         callbacks to be dispatched in a single call. A failing callback will halt the entire process.
     function dispatchCallbacks(Identifier calldata _id, bytes calldata _payload) external payable;

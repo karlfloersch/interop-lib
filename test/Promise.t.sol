@@ -8,7 +8,7 @@ import {IERC20} from "@openzeppelin-contracts/interfaces/IERC20.sol";
 
 import {Identifier} from "../src/interfaces/IIdentifier.sol";
 import {SuperchainERC20} from "../src/SuperchainERC20.sol";
-import {Relayer} from "../src/test/Relayer.sol";
+import {Relayer, RelayedMessage} from "../src/test/Relayer.sol";
 import {IPromise, Handle} from "../src/interfaces/IPromise.sol";
 import {Promise} from "../src/Promise.sol";
 import {PredeployAddresses} from "../src/libraries/PredeployAddresses.sol";
@@ -114,15 +114,30 @@ contract PromiseTest is Relayer, Test {
             abi.encodeCall(IERC20.balanceOf, (address(this)))
         );
 
-        // Test handle retrieval
+        // Initially, the handle should not be completed and not retrievable via getHandle
+        // (handles are only stored in the handles mapping after execution)
+        assertFalse(p.isHandleCompleted(handle.messageHash));
+        
+        // The handle should have been created with correct properties
+        assertTrue(handle.messageHash != bytes32(0));
+        assertEq(handle.destinationChain, chainIdByForkId[forkIds[0]]);
+        assertFalse(handle.completed);
+        assertEq(handle.returnData.length, 0);
+        
+        // After relaying messages and executing handles, it should be retrievable
+        relayAllMessages();
+        relayAllHandlers(p, chainIdByForkId[forkIds[1]]);
+        
+        // Now switch to destination chain to check completion
+        vm.selectFork(forkIds[1]);
+        
+        // Test handle retrieval after execution
         Handle memory retrievedHandle = p.getHandle(handle.messageHash);
         assertEq(retrievedHandle.messageHash, handle.messageHash);
-        assertEq(retrievedHandle.destinationChain, handle.destinationChain);
-        assertEq(retrievedHandle.completed, handle.completed);
-        assertEq(retrievedHandle.returnData.length, handle.returnData.length);
-
+        assertTrue(retrievedHandle.completed);
+        
         // Test completion check
-        assertFalse(p.isHandleCompleted(handle.messageHash));
+        assertTrue(p.isHandleCompleted(handle.messageHash));
     }
 
     function test_andThen_integration_with_relay() public {
@@ -143,31 +158,40 @@ contract PromiseTest is Relayer, Test {
             abi.encodeCall(token.mint, (address(this), 50))
         );
 
+        // Step 3: Attach source-side callback (then: verify balance and set handlerCalled)
+        p.then(msgHash, this.balanceHandler.selector, "abc");
+
         // Verify handle was created correctly
         assertTrue(handle.messageHash != bytes32(0));
         assertEq(handle.destinationChain, chainIdByForkId[forkIds[0]]);
         assertFalse(handle.completed);
         assertEq(handle.returnData.length, 0);
 
-        // Step 3: Also attach source-side callback (then: handle result on A)
-        p.then(msgHash, this.balanceHandler.selector, "abc");
-
-        // Step 4: Relay the initial message (A→B)
+        // Step 4: Relay the initial message (A→B) and capture logs for promise callbacks
         relayAllMessages();
+        Vm.Log[] memory logsWithRelayedMessages = vm.getRecordedLogs();
 
-        // Step 5: Relay the promise callbacks back to A
-        relayAllPromises(p, chainIdByForkId[forkIds[0]]);
+        // Step 4.5: Execute destination-side handles immediately while logs are fresh
+        relayHandlers(logsWithRelayedMessages, p, chainIdByForkId[forkIds[1]]);
 
-        // Verify source-side callback executed
+        // Step 5: Relay the promise callbacks back to A using the logs from step 4
+        // Note: relayPromises uses the logs that contain RelayedMessage events from step 4
+        relayPromises(logsWithRelayedMessages, p, chainIdByForkId[forkIds[0]]);
+
+        // Verify source-side callback executed (check this before switching forks)
         assertTrue(handlerCalled);
 
-        // Step 6: Check that destination-side handle exists and can be queried
+        // Step 6: Verify handle completion on destination chain
+        // Switch to destination chain to check handle completion
+        vm.selectFork(forkIds[1]);
+        
+        // Check that destination-side handle was executed and can be queried
         Handle memory updatedHandle = p.getHandle(handle.messageHash);
         assertEq(updatedHandle.messageHash, handle.messageHash);
-        assertEq(updatedHandle.destinationChain, handle.destinationChain);
+        assertTrue(updatedHandle.completed);
         
-        // Note: In this basic implementation, the handle completion tracking
-        // will be enhanced in Phase 2 to actually execute destination-side logic
+        // Verify the side effect occurred (token minting)
+        assertEq(token.balanceOf(address(this)), 150); // 100 initial + 50 minted
     }
 
     function test_handle_completion_execution() public {
@@ -191,20 +215,22 @@ contract PromiseTest is Relayer, Test {
         // Verify handle is not completed initially
         assertFalse(p.isHandleCompleted(handle.messageHash));
 
-        // Step 3: Relay ALL messages (including handle registration) 
-        // This ensures handles are registered on destination before original message executes
+        // Step 3: Relay ALL messages (including handle registration)
         relayAllMessages();
 
-        // Step 4: Check handle completion on the destination chain (B)
+        // Step 4: Execute all pending handles using the helper function
+        relayAllHandlers(p, chainIdByForkId[forkIds[1]]);
+
+        // Step 5: Check handle completion and side effects on the destination chain (B)
         vm.selectFork(forkIds[1]);
         
-        // The handle should now be completed
+        // The handle should now be completed (Promise contract should have executed it)
         assertTrue(p.isHandleCompleted(handle.messageHash));
         
-        // Get the completed handle to check return data
+        // Get the completed handle to check completion status
         Handle memory completedHandle = p.getHandle(handle.messageHash);
         assertTrue(completedHandle.completed);
-        assertTrue(completedHandle.returnData.length > 0);
+        // Note: returnData may be empty for functions that don't return values (like mint)
         
         // Verify the mint actually happened (token balance should be 150 = 100 initial + 50 minted)
         assertEq(token.balanceOf(address(this)), 150);
@@ -249,25 +275,98 @@ contract PromiseTest is Relayer, Test {
         );
 
         // Step 2: Attach destination-side continuation (andThen: mint tokens on B)
-        p.andThen(
+        Handle memory handle = p.andThen(
             msgHash,
             address(token),
             abi.encodeCall(token.mint, (address(this), 50))
         );
 
-        // Step 3: Relay all messages
+        // Step 3: Relay all messages (including handle registration)
         relayAllMessages();
 
-        // Step 4: Check if handles are present on destination chain
+        // Step 4: Execute all pending handles
+        relayAllHandlers(p, chainIdByForkId[forkIds[1]]);
+
+        // Step 5: Check results on destination chain
         vm.selectFork(forkIds[1]);
         Handle[] memory pendingOnDest = p.getPendingHandles(msgHash);
         
-        // Debug: verify handles are registered
+        // Debug: verify handles and check completion
         console.log("Pending handles count:", pendingOnDest.length);
         if (pendingOnDest.length > 0) {
             console.log("Handle target:", pendingOnDest[0].target);
             console.log("Handle completed:", pendingOnDest[0].completed);
         }
+        
+        // Check handle completion status using the contract methods
+        console.log("Handle completed via isHandleCompleted:", p.isHandleCompleted(handle.messageHash));
+        
+        // Try to get the completed handle
+        Handle memory retrievedHandle = p.getHandle(handle.messageHash);
+        console.log("Retrieved handle messageHash != 0:", retrievedHandle.messageHash != bytes32(0));
+        console.log("Retrieved handle completed:", retrievedHandle.completed);
+        
+        // Check if token balance increased (indicating successful handle execution)
+        console.log("Token balance after handle execution:", token.balanceOf(address(this)));
+    }
+
+    function test_debug_promise_relay() public {
+        vm.selectFork(forkIds[0]);
+
+        // Reset state for this test
+        handlerCalled = false;
+
+        // Step 1: Send message and attach callback
+        bytes32 msgHash = p.sendMessage(
+            chainIdByForkId[forkIds[1]], address(token), abi.encodeCall(IERC20.balanceOf, (address(this)))
+        );
+        p.then(msgHash, this.balanceHandler.selector, "abc");
+
+        // Step 2: Relay messages to destination and capture the logs that contain RelayedMessage events
+        relayAllMessages();
+        Vm.Log[] memory logsWithRelayedMessages = vm.getRecordedLogs();
+
+        // Step 3: Check what logs we have for promise relay
+        console.log("Total logs captured after relayAllMessages:", logsWithRelayedMessages.length);
+        
+        bytes32 promiseRelayedMessageSig = keccak256("RelayedMessage(bytes32,bytes)");
+        uint256 promiseEventCount = 0;
+        
+        for (uint256 i = 0; i < logsWithRelayedMessages.length; i++) {
+            if (logsWithRelayedMessages[i].topics[0] == promiseRelayedMessageSig) {
+                promiseEventCount++;
+                console.log("Found Promise RelayedMessage event at index:", i);
+                console.log("Event emitter:", logsWithRelayedMessages[i].emitter);
+                // Check if emitter is the Promise contract
+                if (logsWithRelayedMessages[i].emitter == address(p)) {
+                    console.log("Event emitted by Promise contract!");
+                    
+                    // Debug the event data
+                    (bytes32 eventMsgHash, bytes memory returnData) = abi.decode(logsWithRelayedMessages[i].data, (bytes32, bytes));
+                    console.log("Event message hash:");
+                    console.logBytes32(eventMsgHash);
+                    console.log("Return data length:", returnData.length);
+                    
+                    // Check if there are callbacks for this message
+                    // Note: we can't easily check callbacks from the test since it's internal
+                    console.log("Original message hash:");
+                    console.logBytes32(msgHash);
+                    console.log("Do hashes match?", eventMsgHash == msgHash);
+                }
+            }
+        }
+        console.log("Promise RelayedMessage events found:", promiseEventCount);
+
+        // Step 4: Use the captured logs to relay promises
+        RelayedMessage[] memory relayedPromises = relayPromises(logsWithRelayedMessages, p, chainIdByForkId[forkIds[0]]);
+        console.log("Promises relayed:", relayedPromises.length);
+        
+        console.log("Handler called:", handlerCalled);
+    }
+    
+    function tryRelayPromises(IPromise p, uint256 sourceChainId) external returns (uint256) {
+        RelayedMessage[] memory relayedPromises = relayAllPromises(p, sourceChainId);
+        return relayedPromises.length;
     }
 
     function balanceHandler(uint256 balance) public async {
