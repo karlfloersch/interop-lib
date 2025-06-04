@@ -19,6 +19,7 @@ struct Handle {
     bytes message;
     bool completed;
     bytes returnData;
+    bytes32 nestedPromiseHash; // Points to a nested promise if this handle returns a promise
 }
 
 interface IPromise {
@@ -41,6 +42,12 @@ interface IPromise {
 
     /// @notice an event emitted when a handle is completed with return data
     event HandleCompleted(bytes32 handleHash, bytes returnData);
+
+    /// @notice an event emitted when a handle creates a nested promise
+    event NestedPromiseCreated(bytes32 parentHandleHash, bytes32 nestedPromiseHash);
+
+    /// @notice an event emitted when a nested promise chain is resolved
+    event NestedPromiseResolved(bytes32 rootPromiseHash, bytes32 finalValue);
 
     /// @notice send a message to the destination contract capturing the return value. this cannot call
     ///         contracts that rely on the L2ToL2CrossDomainMessenger, such as the SuperchainTokenBridge.
@@ -91,4 +98,25 @@ interface IPromise {
 
     /// @notice get the relay identifier that is satisfying the promise
     function promiseRelayIdentifier() external view returns (Identifier memory);
+
+    /// @notice Check if a handle's return data represents a nested promise
+    /// @param _handleHash The hash of the handle to check
+    /// @return isNested Whether the handle contains a nested promise
+    /// @return nestedPromiseHash The hash of the nested promise if it exists
+    function getNestedPromise(bytes32 _handleHash) external view returns (bool isNested, bytes32 nestedPromiseHash);
+
+    /// @notice Resolve a nested promise chain by following promise links
+    /// @param _rootPromiseHash The starting promise hash
+    /// @return resolved Whether the chain is fully resolved  
+    /// @return finalReturnData The final return data from the resolved chain
+    function resolveNestedPromise(bytes32 _rootPromiseHash) external view returns (bool resolved, bytes memory finalReturnData);
+
+    /// @notice Chain another promise to execute after this handle completes
+    /// @dev This creates a nested promise relationship where the new promise depends on this handle's completion
+    /// @param _handleHash The handle to chain from
+    /// @param _destination The destination chain for the new promise
+    /// @param _target The target contract for the new promise  
+    /// @param _message The message for the new promise
+    /// @return nestedPromiseHash The hash of the newly created nested promise
+    function chainPromise(bytes32 _handleHash, uint256 _destination, address _target, bytes calldata _message) external returns (bytes32 nestedPromiseHash);
 }

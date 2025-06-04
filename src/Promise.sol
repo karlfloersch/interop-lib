@@ -34,6 +34,12 @@ contract Promise is TransientReentrancyAware {
     /// @notice a mapping to store handle registration intents for cross-chain execution
     mapping(bytes32 => Handle[]) public pendingHandles;
 
+    /// @notice a mapping to track nested promise relationships
+    mapping(bytes32 => bytes32) public nestedPromises;
+
+    /// @notice a mapping to track promise chains (parent -> child relationships)
+    mapping(bytes32 => bytes32[]) public promiseChains;
+
     /// @notice the relay identifier that is satisfying the promise
     Identifier internal currentRelayIdentifier;
 
@@ -72,6 +78,12 @@ contract Promise is TransientReentrancyAware {
 
     /// @notice an event emitted when a handle is completed with return data
     event HandleCompleted(bytes32 handleHash, bytes returnData);
+
+    /// @notice an event emitted when a nested promise is created
+    event NestedPromiseCreated(bytes32 parentPromiseHash, bytes32 nestedPromiseHash);
+
+    /// @notice an event emitted when a nested promise chain is resolved
+    event NestedPromiseResolved(bytes32 rootPromiseHash, bytes32 finalValue);
 
     /// @dev Modifier to restrict a function to only be a cross domain callback into this contract
     modifier onlyCrossDomainCallback() {
@@ -133,6 +145,20 @@ contract Promise is TransientReentrancyAware {
             if (handleSuccess) {
                 pendingHandle.completed = true;
                 pendingHandle.returnData = handleReturnData;
+                
+                // Check if the return data represents a nested promise (32 bytes that could be a message hash)
+                if (handleReturnData.length == 32) {
+                    bytes32 potentialPromiseHash = abi.decode(handleReturnData, (bytes32));
+                    
+                    // If this looks like a valid promise hash and we sent it, treat it as nested
+                    if (sentMessages[potentialPromiseHash]) {
+                        pendingHandle.nestedPromiseHash = potentialPromiseHash;
+                        nestedPromises[pendingHandle.messageHash] = potentialPromiseHash;
+                        promiseChains[pendingHandle.messageHash].push(potentialPromiseHash);
+                        
+                        emit NestedPromiseCreated(pendingHandle.messageHash, potentialPromiseHash);
+                    }
+                }
                 
                 // Store the completed handle
                 handles[pendingHandle.messageHash] = pendingHandle;
@@ -218,7 +244,8 @@ contract Promise is TransientReentrancyAware {
             target: _target,
             message: _message,
             completed: false,
-            returnData: ""
+            returnData: "",
+            nestedPromiseHash: bytes32(0) // Initially no nested promise
         });
         
         // Calculate the reconstructed message hash that handleMessage will use
@@ -297,10 +324,107 @@ contract Promise is TransientReentrancyAware {
                 pendingHandle.completed = true;
                 pendingHandle.returnData = handleReturnData;
                 
+                // Check if the return data represents a nested promise (32 bytes that could be a message hash)
+                if (handleReturnData.length == 32) {
+                    bytes32 potentialPromiseHash = abi.decode(handleReturnData, (bytes32));
+                    
+                    // If this looks like a valid promise hash and we sent it, treat it as nested
+                    if (sentMessages[potentialPromiseHash]) {
+                        pendingHandle.nestedPromiseHash = potentialPromiseHash;
+                        nestedPromises[pendingHandle.messageHash] = potentialPromiseHash;
+                        promiseChains[pendingHandle.messageHash].push(potentialPromiseHash);
+                        
+                        emit NestedPromiseCreated(pendingHandle.messageHash, potentialPromiseHash);
+                    }
+                }
+                
                 // Store the completed handle
                 handles[pendingHandle.messageHash] = pendingHandle;
                 emit HandleCompleted(pendingHandle.messageHash, handleReturnData);
             }
         }
+    }
+
+    /// @notice Check if a handle's return data represents a nested promise
+    /// @param _handleHash The hash of the handle to check
+    /// @return isNested Whether the handle contains a nested promise
+    /// @return nestedPromiseHash The hash of the nested promise if it exists
+    function getNestedPromise(bytes32 _handleHash) external view returns (bool isNested, bytes32 nestedPromiseHash) {
+        Handle memory handle = handles[_handleHash];
+        isNested = handle.nestedPromiseHash != bytes32(0);
+        nestedPromiseHash = handle.nestedPromiseHash;
+    }
+
+    /// @notice Resolve a nested promise chain by following promise links
+    /// @param _rootPromiseHash The starting promise hash
+    /// @return resolved Whether the chain is fully resolved  
+    /// @return finalReturnData The final return data from the resolved chain
+    function resolveNestedPromise(bytes32 _rootPromiseHash) external view returns (bool resolved, bytes memory finalReturnData) {
+        Handle memory handle = handles[_rootPromiseHash];
+        
+        // If no handle exists or it's not completed, chain is not resolved
+        if (!handle.completed) {
+            return (false, "");
+        }
+        
+        // If no nested promise, this is the end of the chain
+        if (handle.nestedPromiseHash == bytes32(0)) {
+            return (true, handle.returnData);
+        }
+        
+        // Follow the chain recursively (with depth limit to prevent infinite loops)
+        return _resolveNestedPromiseRecursive(handle.nestedPromiseHash, 0);
+    }
+
+    /// @notice Internal recursive function to resolve nested promises with depth limiting
+    /// @param _promiseHash The current promise hash to resolve
+    /// @param _depth Current recursion depth
+    /// @return resolved Whether the chain is fully resolved
+    /// @return finalReturnData The final return data from the resolved chain
+    function _resolveNestedPromiseRecursive(bytes32 _promiseHash, uint256 _depth) internal view returns (bool resolved, bytes memory finalReturnData) {
+        // Prevent infinite recursion
+        if (_depth > 10) {
+            return (false, "Max chain depth exceeded");
+        }
+        
+        Handle memory handle = handles[_promiseHash];
+        
+        // If handle doesn't exist or isn't completed, chain is not resolved
+        if (!handle.completed) {
+            return (false, "");
+        }
+        
+        // If no nested promise, this is the end of the chain
+        if (handle.nestedPromiseHash == bytes32(0)) {
+            return (true, handle.returnData);
+        }
+        
+        // Continue following the chain
+        return _resolveNestedPromiseRecursive(handle.nestedPromiseHash, _depth + 1);
+    }
+
+    /// @notice Chain another promise to execute after this handle completes
+    /// @dev This creates a nested promise relationship where the new promise depends on this handle's completion
+    /// @param _handleHash The handle to chain from
+    /// @param _destination The destination chain for the new promise
+    /// @param _target The target contract for the new promise  
+    /// @param _message The message for the new promise
+    /// @return nestedPromiseHash The hash of the newly created nested promise
+    function chainPromise(bytes32 _handleHash, uint256 _destination, address _target, bytes calldata _message) external returns (bytes32 nestedPromiseHash) {
+        Handle memory handle = handles[_handleHash];
+        require(handle.completed, "Promise: parent handle not completed");
+        require(handle.nestedPromiseHash == bytes32(0), "Promise: handle already has nested promise");
+        
+        // Create a new promise that depends on this handle's completion
+        nestedPromiseHash = this.sendMessage(_destination, _target, _message);
+        
+        // Update the handle to point to the new nested promise
+        handles[_handleHash].nestedPromiseHash = nestedPromiseHash;
+        nestedPromises[_handleHash] = nestedPromiseHash;
+        promiseChains[_handleHash].push(nestedPromiseHash);
+        
+        emit NestedPromiseCreated(_handleHash, nestedPromiseHash);
+        
+        return nestedPromiseHash;
     }
 }

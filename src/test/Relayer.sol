@@ -187,7 +187,7 @@ abstract contract Relayer is CommonBase {
      */
     function isHandleRegistrationMessage(Vm.Log memory log) internal pure returns (bool) {
         // Handle registration messages have registerHandle() selector in their data
-        bytes4 registerHandleSelector = bytes4(keccak256("registerHandle(bytes32,(bytes32,uint256,address,bytes,bool,bytes))"));
+        bytes4 registerHandleSelector = bytes4(keccak256("registerHandle(bytes32,(bytes32,uint256,address,bytes,bool,bytes,bytes32))"));
         
         // The SentMessage log structure:
         // topics[0] = event signature
