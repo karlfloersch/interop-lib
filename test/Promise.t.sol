@@ -99,6 +99,32 @@ contract PromiseTest is Relayer, Test {
         assertEq(handle.returnData.length, 0);
     }
 
+    function test_handle_storage_and_retrieval() public {
+        vm.selectFork(forkIds[0]);
+
+        // Send a message to attach the andThen to
+        bytes32 msgHash = p.sendMessage(
+            chainIdByForkId[forkIds[1]], address(token), abi.encodeCall(IERC20.balanceOf, (address(this)))
+        );
+
+        // Use andThen to register a destination-side callback
+        Handle memory handle = p.andThen(
+            msgHash,
+            address(token),
+            abi.encodeCall(IERC20.balanceOf, (address(this)))
+        );
+
+        // Test handle retrieval
+        Handle memory retrievedHandle = p.getHandle(handle.messageHash);
+        assertEq(retrievedHandle.messageHash, handle.messageHash);
+        assertEq(retrievedHandle.destinationChain, handle.destinationChain);
+        assertEq(retrievedHandle.completed, handle.completed);
+        assertEq(retrievedHandle.returnData.length, handle.returnData.length);
+
+        // Test completion check
+        assertFalse(p.isHandleCompleted(handle.messageHash));
+    }
+
     function balanceHandler(uint256 balance) public async {
         handlerCalled = true;
         require(balance == 100, "PromiseTest: balance mismatch");

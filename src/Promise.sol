@@ -166,4 +166,18 @@ contract Promise is TransientReentrancyAware {
         
         return handle;
     }
+
+    /// @notice get a handle by its message hash
+    /// @param _handleHash The hash of the handle to retrieve
+    /// @return handle The handle struct
+    function getHandle(bytes32 _handleHash) external view returns (Handle memory) {
+        return handles[_handleHash];
+    }
+
+    /// @notice check if a handle is completed
+    /// @param _handleHash The hash of the handle to check
+    /// @return completed Whether the handle is completed
+    function isHandleCompleted(bytes32 _handleHash) external view returns (bool) {
+        return handles[_handleHash].completed;
+    }
 }

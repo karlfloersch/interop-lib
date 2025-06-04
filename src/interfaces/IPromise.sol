@@ -57,6 +57,16 @@ interface IPromise {
     /// @return handle A handle representing the destination-side promise
     function andThen(bytes32 _msgHash, address _target, bytes calldata _message) external returns (Handle memory);
 
+    /// @notice get a handle by its message hash
+    /// @param _handleHash The hash of the handle to retrieve
+    /// @return handle The handle struct
+    function getHandle(bytes32 _handleHash) external view returns (Handle memory);
+
+    /// @notice check if a handle is completed
+    /// @param _handleHash The hash of the handle to check
+    /// @return completed Whether the handle is completed
+    function isHandleCompleted(bytes32 _handleHash) external view returns (bool);
+
     /// @notice invoke continuations present on the completion of a remote message. for now this requires all
     ///         callbacks to be dispatched in a single call. A failing callback will halt the entire process.
     function dispatchCallbacks(Identifier calldata _id, bytes calldata _payload) external payable;
