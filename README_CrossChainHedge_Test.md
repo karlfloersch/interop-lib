@@ -161,4 +161,44 @@ Step 2 (BTC Purchase): PASS
 Step 3 (Hedge Position): PASS
 ```
 
-This test framework provides a solid foundation for developing and testing complex cross-chain DeFi workflows using the Promise infrastructure. 
+This test framework provides a solid foundation for developing and testing complex cross-chain DeFi workflows using the Promise infrastructure.
+
+## Desired SuperScript Syntax
+
+The original `CrossChainHedgedBTCPosition.sol` demonstrates the **intended syntax** for Promise-based superscripts:
+
+```solidity
+function execute(bytes memory paramsData) external {
+    Params memory params = abi.decode(paramsData, (Params));
+    
+    // Step 1: Check BTC price on Unichain
+    bytes32 priceCheckMsg = IPromise(PredeployAddresses.PROMISE).sendMessage(
+        params.unichainId,
+        params.unichainDEX,
+        abi.encodeWithSignature("getCurrentBTCPrice()")
+    );
+    
+    // Step 2: Conditional purchase with nested hedge calculation
+    IPromise(PredeployAddresses.PROMISE).andThen(
+        priceCheckMsg,
+        params.unichainDEX,
+        abi.encodeWithSignature("buyBTCIfGoodPrice(uint256,uint256)", params.priceThreshold, params.btcAmount)
+    );
+    
+    // Step 3: Open short position hedge on OP Mainnet
+    IPromise(PredeployAddresses.PROMISE).then(
+        priceCheckMsg,
+        this.openShortBTCPerp.selector,
+        abi.encode(params)
+    );
+}
+```
+
+### Key Syntax Patterns
+
+1. **Cross-chain message**: `sendMessage(chainId, target, calldata)`
+2. **Destination-side continuation**: `andThen(messageHash, target, calldata)` 
+3. **Source-side callback**: `then(messageHash, selector, context)`
+4. **Chained execution**: All operations reference the same `priceCheckMsg`
+
+This syntax shows how a complete cross-chain workflow can be expressed declaratively in a single function, with the Promise infrastructure handling all the cross-chain coordination automatically. 

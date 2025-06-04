@@ -48,29 +48,26 @@ contract CrossChainHedgedBTCPosition {
         );
         
         // Step 2: Conditional purchase with nested hedge calculation
-        // This andThen will be implemented when we build the promise library
-        // For now, we'll use a placeholder structure
-        /*
-        Promise memory purchasePromise = Promise(priceCheckMsg).andThen(
+        IPromise(PredeployAddresses.PROMISE).andThen(
+            priceCheckMsg,
             params.unichainDEX,
-            "buyBTCIfGoodPrice(uint256,uint256)",
-            abi.encode(params.priceThreshold, params.btcAmount)
+            abi.encodeWithSignature("buyBTCIfGoodPrice(uint256,uint256)", params.priceThreshold, params.btcAmount)
         );
         
         // Step 3: Open short position hedge on OP Mainnet
-        purchasePromise.then(
-            address(this),
-            "openShortBTCPerp(bytes)"
+        IPromise(PredeployAddresses.PROMISE).then(
+            priceCheckMsg,
+            this.openShortBTCPerp.selector,
+            abi.encode(params)
         );
-        */
         
-        // For now, just record that execution was attempted
+        // Initialize execution result
         executionResult = ExecutionResult({
             success: true,
             btcPurchased: params.btcAmount,
             hedgeAmount: params.btcAmount / 2, // 50% hedge
             executionPrice: params.priceThreshold,
-            status: "SuperScript executed successfully"
+            status: "SuperScript execution initiated"
         });
     }
     
