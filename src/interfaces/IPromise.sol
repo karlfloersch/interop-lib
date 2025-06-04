@@ -72,6 +72,11 @@ interface IPromise {
     /// @return completed Whether the handle is completed
     function isHandleCompleted(bytes32 _handleHash) external view returns (bool);
 
+    /// @notice get pending handles for a message hash
+    /// @param _msgHash The message hash to get pending handles for
+    /// @return handles Array of pending handles
+    function getPendingHandles(bytes32 _msgHash) external view returns (Handle[] memory);
+
     /// @notice invoke continuations present on the completion of a remote message. for now this requires all
     ///         callbacks to be dispatched in a single call. A failing callback will halt the entire process.
     function dispatchCallbacks(Identifier calldata _id, bytes calldata _payload) external payable;

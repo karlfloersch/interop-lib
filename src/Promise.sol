@@ -30,6 +30,9 @@ contract Promise is TransientReentrancyAware {
     /// @notice a mapping from message hash to handle hashes for handle execution
     mapping(bytes32 => bytes32[]) public messageToHandles;
 
+    /// @notice a mapping to store handle registration intents for cross-chain execution
+    mapping(bytes32 => Handle[]) public pendingHandles;
+
     /// @notice the relay identifier that is satisfying the promise
     Identifier internal currentRelayIdentifier;
 
@@ -90,22 +93,25 @@ contract Promise is TransientReentrancyAware {
 
         emit RelayedMessage(messageHash, returnData_);
 
-        // Execute any associated handles for destination-side continuations
-        bytes32[] storage handleHashes = messageToHandles[messageHash];
-        for (uint256 i = 0; i < handleHashes.length; i++) {
-            bytes32 handleHash = handleHashes[i];
-            Handle storage handle = handles[handleHash];
+        // Create and execute any pending handles on the destination chain
+        Handle[] storage pendingHandleList = pendingHandles[messageHash];
+        for (uint256 i = 0; i < pendingHandleList.length; i++) {
+            Handle storage pendingHandle = pendingHandleList[i];
             
-            if (!handle.completed) {
-                // Execute the destination-side continuation
-                (bool handleSuccess, bytes memory handleReturnData) = handle.target.call(handle.message);
-                if (handleSuccess) {
-                    handle.completed = true;
-                    handle.returnData = handleReturnData;
-                    emit HandleCompleted(handleHash, handleReturnData);
-                }
-                // Note: we don't revert on handle failure to avoid breaking the main message flow
+            // Update destination chain to current chain
+            pendingHandle.destinationChain = block.chainid;
+            
+            // Execute the destination-side continuation
+            (bool handleSuccess, bytes memory handleReturnData) = pendingHandle.target.call(pendingHandle.message);
+            if (handleSuccess) {
+                pendingHandle.completed = true;
+                pendingHandle.returnData = handleReturnData;
+                
+                // Store the completed handle
+                handles[pendingHandle.messageHash] = pendingHandle;
+                emit HandleCompleted(pendingHandle.messageHash, handleReturnData);
             }
+            // Note: we don't revert on handle failure to avoid breaking the main message flow
         }
     }
 
@@ -178,17 +184,18 @@ contract Promise is TransientReentrancyAware {
         // Generate a unique handle hash for this destination callback
         bytes32 handleHash = keccak256(abi.encodePacked(_msgHash, _target, _message, block.timestamp));
         
+        // Create handle intent (will be materialized on destination chain)
         Handle memory handle = Handle({
             messageHash: handleHash,
-            destinationChain: block.chainid,
+            destinationChain: block.chainid, // This will be updated during relay
             target: _target,
             message: _message,
             completed: false,
             returnData: ""
         });
         
-        handles[handleHash] = handle;
-        messageToHandles[_msgHash].push(handleHash);
+        // Store as pending handle for cross-chain execution
+        pendingHandles[_msgHash].push(handle);
         emit HandleCreated(handleHash, block.chainid);
         
         return handle;
@@ -206,5 +213,12 @@ contract Promise is TransientReentrancyAware {
     /// @return completed Whether the handle is completed
     function isHandleCompleted(bytes32 _handleHash) external view returns (bool) {
         return handles[_handleHash].completed;
+    }
+
+    /// @notice get pending handles for a message hash
+    /// @param _msgHash The message hash to get pending handles for
+    /// @return handles Array of pending handles
+    function getPendingHandles(bytes32 _msgHash) external view returns (Handle[] memory) {
+        return pendingHandles[_msgHash];
     }
 }
