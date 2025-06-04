@@ -1,8 +1,9 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.25;
+pragma solidity ^0.8.25;
 
 import {IL2ToL2CrossDomainMessenger} from "./interfaces/IL2ToL2CrossDomainMessenger.sol";
 import {ICrossL2Inbox, Identifier} from "./interfaces/ICrossL2Inbox.sol";
+import {Handle} from "./interfaces/IPromise.sol";
 import {Hashing} from "./libraries/Hashing.sol";
 import {PredeployAddresses} from "./libraries/PredeployAddresses.sol";
 import {TransientReentrancyAware} from "./libraries/TransientContext.sol";
@@ -23,6 +24,9 @@ contract Promise is TransientReentrancyAware {
     /// @notice a mapping of message hashes to their registered callbacks
     mapping(bytes32 => Callback[]) public callbacks;
 
+    /// @notice a mapping to track destination-side promise handles
+    mapping(bytes32 => Handle) public handles;
+
     /// @notice the relay identifier that is satisfying the promise
     Identifier internal currentRelayIdentifier;
 
@@ -41,6 +45,9 @@ contract Promise is TransientReentrancyAware {
 
     /// @notice an event emitted when a message is relayed
     event RelayedMessage(bytes32 messageHash, bytes returnData);
+
+    /// @notice an event emitted when a handle is created for destination-side execution
+    event HandleCreated(bytes32 messageHash, uint256 destinationChain);
 
     /// @dev Modifier to restrict a function to only be a cross domain callback into this contract
     modifier onlyCrossDomainCallback() {
@@ -134,5 +141,29 @@ contract Promise is TransientReentrancyAware {
     /// @notice get the relay identifier that is satisfying the promise
     function promiseRelayIdentifier() public view returns (Identifier memory) {
         return currentRelayIdentifier;
+    }
+
+    /// @notice attach a destination-side continuation that executes on the destination chain
+    /// @param _msgHash The message hash to attach the destination callback to
+    /// @param _target The contract to call on the destination chain
+    /// @param _message The message to send to the destination contract
+    /// @return handle A handle representing the destination-side promise
+    function andThen(bytes32 _msgHash, address _target, bytes calldata _message) external returns (Handle memory) {
+        require(sentMessages[_msgHash], "Promise: message not sent");
+        
+        // Generate a unique handle hash for this destination callback
+        bytes32 handleHash = keccak256(abi.encodePacked(_msgHash, _target, _message, block.timestamp));
+        
+        Handle memory handle = Handle({
+            messageHash: handleHash,
+            destinationChain: block.chainid,
+            completed: false,
+            returnData: ""
+        });
+        
+        handles[handleHash] = handle;
+        emit HandleCreated(handleHash, block.chainid);
+        
+        return handle;
     }
 }

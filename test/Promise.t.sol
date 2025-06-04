@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.25;
+pragma solidity ^0.8.25;
 
 import {Test} from "forge-std/Test.sol";
 import {console} from "forge-std/console.sol";
@@ -9,7 +9,8 @@ import {IERC20} from "@openzeppelin-contracts/interfaces/IERC20.sol";
 import {Identifier} from "../src/interfaces/IIdentifier.sol";
 import {SuperchainERC20} from "../src/SuperchainERC20.sol";
 import {Relayer} from "../src/test/Relayer.sol";
-import {IPromise} from "../src/interfaces/IPromise.sol";
+import {IPromise, Handle} from "../src/interfaces/IPromise.sol";
+import {Promise} from "../src/Promise.sol";
 import {PredeployAddresses} from "../src/libraries/PredeployAddresses.sol";
 
 contract PromiseTest is Relayer, Test {
@@ -29,9 +30,19 @@ contract PromiseTest is Relayer, Test {
 
     function setUp() public {
         vm.selectFork(forkIds[0]);
+        
+        // Deploy Promise contract at predeploy address
+        Promise promiseImpl = new Promise();
+        vm.etch(PredeployAddresses.PROMISE, address(promiseImpl).code);
+        
         token = new L2NativeSuperchainERC20{salt: bytes32(0)}();
 
         vm.selectFork(forkIds[1]);
+        
+        // Deploy Promise contract at predeploy address on second fork too
+        promiseImpl = new Promise();
+        vm.etch(PredeployAddresses.PROMISE, address(promiseImpl).code);
+        
         new L2NativeSuperchainERC20{salt: bytes32(0)}();
 
         // mint tokens on chain B
@@ -64,6 +75,28 @@ contract PromiseTest is Relayer, Test {
         // context is empty
         assertEq(p.promiseContext().length, 0);
         assertEq(p.promiseRelayIdentifier().origin, address(0));
+    }
+
+    function test_andThen_creates_handle() public {
+        vm.selectFork(forkIds[0]);
+
+        // Send a message to attach the andThen to
+        bytes32 msgHash = p.sendMessage(
+            chainIdByForkId[forkIds[1]], address(token), abi.encodeCall(IERC20.balanceOf, (address(this)))
+        );
+
+        // Use andThen to register a destination-side callback
+        Handle memory handle = p.andThen(
+            msgHash,
+            address(token),
+            abi.encodeCall(IERC20.balanceOf, (address(this)))
+        );
+
+        // Verify handle properties
+        assertTrue(handle.messageHash != bytes32(0));
+        assertEq(handle.destinationChain, chainIdByForkId[forkIds[0]]);
+        assertFalse(handle.completed);
+        assertEq(handle.returnData.length, 0);
     }
 
     function balanceHandler(uint256 balance) public async {
