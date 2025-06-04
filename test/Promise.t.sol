@@ -125,6 +125,51 @@ contract PromiseTest is Relayer, Test {
         assertFalse(p.isHandleCompleted(handle.messageHash));
     }
 
+    function test_andThen_integration_with_relay() public {
+        vm.selectFork(forkIds[0]);
+
+        // Reset state for this test
+        handlerCalled = false;
+
+        // Step 1: Send initial message (A→B: query balance)
+        bytes32 msgHash = p.sendMessage(
+            chainIdByForkId[forkIds[1]], address(token), abi.encodeCall(IERC20.balanceOf, (address(this)))
+        );
+
+        // Step 2: Attach destination-side continuation (andThen: mint tokens on B)
+        Handle memory handle = p.andThen(
+            msgHash,
+            address(token),
+            abi.encodeCall(token.mint, (address(this), 50))
+        );
+
+        // Verify handle was created correctly
+        assertTrue(handle.messageHash != bytes32(0));
+        assertEq(handle.destinationChain, chainIdByForkId[forkIds[0]]);
+        assertFalse(handle.completed);
+        assertEq(handle.returnData.length, 0);
+
+        // Step 3: Also attach source-side callback (then: handle result on A)
+        p.then(msgHash, this.balanceHandler.selector, "abc");
+
+        // Step 4: Relay the initial message (A→B)
+        relayAllMessages();
+
+        // Step 5: Relay the promise callbacks back to A
+        relayAllPromises(p, chainIdByForkId[forkIds[0]]);
+
+        // Verify source-side callback executed
+        assertTrue(handlerCalled);
+
+        // Step 6: Check that destination-side handle exists and can be queried
+        Handle memory updatedHandle = p.getHandle(handle.messageHash);
+        assertEq(updatedHandle.messageHash, handle.messageHash);
+        assertEq(updatedHandle.destinationChain, handle.destinationChain);
+        
+        // Note: In this basic implementation, the handle completion tracking
+        // will be enhanced in Phase 2 to actually execute destination-side logic
+    }
+
     function balanceHandler(uint256 balance) public async {
         handlerCalled = true;
         require(balance == 100, "PromiseTest: balance mismatch");
