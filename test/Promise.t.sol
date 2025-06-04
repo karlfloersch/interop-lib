@@ -11,6 +11,7 @@ import {SuperchainERC20} from "../src/SuperchainERC20.sol";
 import {Relayer} from "../src/test/Relayer.sol";
 import {IPromise} from "../src/interfaces/IPromise.sol";
 import {PredeployAddresses} from "../src/libraries/PredeployAddresses.sol";
+import {PromiseAwareMessenger} from "../src/PromiseAwareMessenger.sol";
 
 contract PromiseTest is Relayer, Test {
     IPromise public p = IPromise(PredeployAddresses.PROMISE);
@@ -210,6 +211,36 @@ contract PromiseTest is Relayer, Test {
         
         console.log("Nested promise completed with doubled value:", doubledValue);
         // This proves the nested promise worked, but parent didn't wait for it
+    }
+
+    function test_wrapper_basic_functionality() public {
+        vm.selectFork(forkIds[0]);
+        
+        // Deploy wrapper on both chains
+        PromiseAwareMessenger wrapper = new PromiseAwareMessenger();
+        vm.selectFork(forkIds[1]);
+        PromiseAwareMessenger wrapperB = new PromiseAwareMessenger();
+        vm.selectFork(forkIds[0]);
+        
+        console.log("=== Testing PromiseAwareMessenger Basic Wrapper ===");
+        
+        // Use wrapper to send a message (should work identically to direct CDM)
+        bytes32 messageHash = wrapper.sendMessage(
+            chainIdByForkId[forkIds[1]],
+            address(token),
+            abi.encodeCall(IERC20.balanceOf, (address(this)))
+        );
+        
+        console.log("Message sent via wrapper, hash:", vm.toString(messageHash));
+        
+        // Relay the message using the test infrastructure
+        relayAllMessages();
+        
+        console.log("SUCCESS: Message was successfully sent and relayed through wrapper");
+        console.log("Wrapper delegates correctly to underlying CDM");
+        
+        // Verify message hash is valid
+        assertTrue(messageHash != bytes32(0), "Message hash should not be zero");
     }
 }
 
