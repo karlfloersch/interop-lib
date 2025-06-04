@@ -85,10 +85,10 @@ contract CrossChainHedgedBTCE2ETest is Relayer, Test {
         test_step1_price_check();
         
         // STEP 2: Conditional BTC Purchase (Comment out to disable)
-        // test_step2_conditional_purchase();
+        test_step2_conditional_purchase();
         
         // STEP 3: Hedge Position Opening (Comment out to disable)
-        // test_step3_hedge_position();
+        test_step3_hedge_position();
         
         console.log("=== Test Complete ===");
         console.log("Step 1 (Price Check):", step1Completed ? "PASS" : "FAIL");
@@ -163,13 +163,13 @@ contract CrossChainHedgedBTCE2ETest is Relayer, Test {
     
     /// @notice Test Step 2: Conditional BTC purchase
     function test_step2_conditional_purchase() public {
-        vm.selectFork(forkIds[0]);
+        vm.selectFork(forkIds[1]); // Switch to Unichain where the DEX is deployed
         
         console.log("--- Step 2: Conditional BTC Purchase ---");
         
         // This step would execute the conditional purchase logic
         // For now, we'll mock it
-        MockUnichainDEX(address(unichainDEX)).simulateBTCPurchase(2.5e18, 57000e18);
+        unichainDEX.simulateBTCPurchase(2.5e18, 57000e18);
         
         step2Completed = true;
         console.log("PASS: Step 2 Complete: BTC purchase executed");
