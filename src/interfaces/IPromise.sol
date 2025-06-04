@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.25;
+pragma solidity ^0.8.25;
 
 import {Identifier} from "./IIdentifier.sol";
 
@@ -9,6 +9,14 @@ struct Callback {
     address target;
     bytes4 selector;
     bytes context;
+}
+
+/// @notice Handle representing a promise that executes on the destination chain
+struct Handle {
+    bytes32 messageHash;
+    uint256 destinationChain;
+    bool completed;
+    bytes returnData;
 }
 
 interface IPromise {
@@ -26,6 +34,9 @@ interface IPromise {
     /// @notice an event emitted when a message is relayed
     event RelayedMessage(bytes32 messageHash, bytes returnData);
 
+    /// @notice an event emitted when a handle is created for destination-side execution
+    event HandleCreated(bytes32 messageHash, uint256 destinationChain);
+
     /// @notice send a message to the destination contract capturing the return value. this cannot call
     ///         contracts that rely on the L2ToL2CrossDomainMessenger, such as the SuperchainTokenBridge.
     function sendMessage(uint256 _destination, address _target, bytes calldata _message) external returns (bytes32);
@@ -38,6 +49,13 @@ interface IPromise {
 
     /// @notice attach a continuation dependent on the return value and some additional saved context
     function then(bytes32 _msgHash, bytes4 _selector, bytes calldata _context) external;
+
+    /// @notice attach a destination-side continuation that executes on the destination chain
+    /// @param _msgHash The message hash to attach the destination callback to
+    /// @param _target The contract to call on the destination chain
+    /// @param _message The message to send to the destination contract
+    /// @return handle A handle representing the destination-side promise
+    function andThen(bytes32 _msgHash, address _target, bytes calldata _message) external returns (Handle memory);
 
     /// @notice invoke continuations present on the completion of a remote message. for now this requires all
     ///         callbacks to be dispatched in a single call. A failing callback will halt the entire process.
