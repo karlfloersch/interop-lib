@@ -41,14 +41,15 @@ contract PromiseAwareMessenger {
     }
     
     /// @notice Relay a message to the actual target on the destination chain
-    /// @dev This is called by the PromiseAwareMessenger on the destination chain
+    /// @dev This is called by the Promise contract on the destination chain
     /// @param _target The actual target contract to call
     /// @param _message The message to send to the target
     /// @return returnData The return data from the target call
     function relayToTarget(address _target, bytes calldata _message) external returns (bytes memory) {
-        // Verify this is a cross-domain call from another PromiseAwareMessenger
-        require(msg.sender == address(messenger), "PromiseAwareMessenger: caller not messenger");
-        require(messenger.crossDomainMessageSender() == address(this), "PromiseAwareMessenger: invalid sender");
+        console.log("relayToTarget called by:", msg.sender);
+        
+        // Verify this is called by the Promise contract during message handling
+        require(msg.sender == address(promiseContract), "PromiseAwareMessenger: caller not promise");
         
         // Call the actual target contract
         (bool success, bytes memory returnData) = _target.call(_message);
