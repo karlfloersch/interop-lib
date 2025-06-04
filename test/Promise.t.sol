@@ -240,6 +240,36 @@ contract PromiseTest is Relayer, Test {
         assertEq(pendingOnDest[0].target, address(token));
     }
 
+    function test_debug_handle_execution_timing() public {
+        vm.selectFork(forkIds[0]);
+
+        // Step 1: Send initial message (A→B: query balance)
+        bytes32 msgHash = p.sendMessage(
+            chainIdByForkId[forkIds[1]], address(token), abi.encodeCall(IERC20.balanceOf, (address(this)))
+        );
+
+        // Step 2: Attach destination-side continuation (andThen: mint tokens on B)
+        p.andThen(
+            msgHash,
+            address(token),
+            abi.encodeCall(token.mint, (address(this), 50))
+        );
+
+        // Step 3: Relay all messages
+        relayAllMessages();
+
+        // Step 4: Check if handles are present on destination chain
+        vm.selectFork(forkIds[1]);
+        Handle[] memory pendingOnDest = p.getPendingHandles(msgHash);
+        
+        // Debug: verify handles are registered
+        console.log("Pending handles count:", pendingOnDest.length);
+        if (pendingOnDest.length > 0) {
+            console.log("Handle target:", pendingOnDest[0].target);
+            console.log("Handle completed:", pendingOnDest[0].completed);
+        }
+    }
+
     function balanceHandler(uint256 balance) public async {
         handlerCalled = true;
         require(balance == 100, "PromiseTest: balance mismatch");

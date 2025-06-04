@@ -7,6 +7,7 @@ import {Handle} from "./interfaces/IPromise.sol";
 import {Hashing} from "./libraries/Hashing.sol";
 import {PredeployAddresses} from "./libraries/PredeployAddresses.sol";
 import {TransientReentrancyAware} from "./libraries/TransientContext.sol";
+import {console} from "forge-std/console.sol";
 
 contract Promise is TransientReentrancyAware {
     /// @notice a struct to represent a callback to be executed when the return value of
@@ -99,6 +100,13 @@ contract Promise is TransientReentrancyAware {
 
         // Create and execute any pending handles on the destination chain
         Handle[] storage pendingHandleList = pendingHandles[messageHash];
+        
+        // Debug: Check if we have pending handles
+        console.log("handleMessage - messageHash:");
+        console.logBytes32(messageHash);
+        console.log("handleMessage - pending handles count:");
+        console.logUint(pendingHandleList.length);
+        
         for (uint256 i = 0; i < pendingHandleList.length; i++) {
             Handle storage pendingHandle = pendingHandleList[i];
             
