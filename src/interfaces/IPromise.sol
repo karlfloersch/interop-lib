@@ -119,4 +119,24 @@ interface IPromise {
     /// @param _message The message for the new promise
     /// @return nestedPromiseHash The hash of the newly created nested promise
     function chainPromise(bytes32 _handleHash, uint256 _destination, address _target, bytes calldata _message) external returns (bytes32 nestedPromiseHash);
+
+    /// @notice Check if a promise is fully resolved (no more nested promises)
+    /// @param _promiseHash The promise hash to check
+    /// @return resolved Whether the promise is fully resolved
+    function isPromiseResolved(bytes32 _promiseHash) external view returns (bool);
+
+    /// @notice Automatically track a child promise if called during promise execution
+    /// @dev Called by PromiseAwareMessenger to automatically track child promises
+    /// @param childPromiseHash The hash of the child promise to track
+    function autoTrackChildPromise(bytes32 childPromiseHash) external;
+
+    /// @notice Check if we're currently in promise execution context
+    /// @dev Used by PromiseAwareMessenger to determine if tracking is needed
+    /// @return inContext Whether we're currently executing within a promise
+    function inPromiseExecutionContext() external view returns (bool);
+
+    /// @notice Get the current promise context
+    /// @dev Used for debugging and testing
+    /// @return contextHash The current promise being executed
+    function getCurrentPromiseContext() external view returns (bytes32);
 }

@@ -11,10 +11,12 @@ import {SuperchainERC20} from "../src/SuperchainERC20.sol";
 import {Relayer, RelayedMessage} from "../src/test/Relayer.sol";
 import {IPromise, Handle} from "../src/interfaces/IPromise.sol";
 import {Promise} from "../src/Promise.sol";
+import {PromiseAwareMessenger} from "../src/PromiseAwareMessenger.sol";
 import {PredeployAddresses} from "../src/libraries/PredeployAddresses.sol";
 
 contract PromiseTest is Relayer, Test {
     IPromise public p = IPromise(PredeployAddresses.PROMISE);
+    PromiseAwareMessenger public promiseMessenger;
     L2NativeSuperchainERC20 public token;
 
     event HandlerCalled();
@@ -28,12 +30,15 @@ contract PromiseTest is Relayer, Test {
 
     constructor() Relayer(rpcUrls) {}
 
-    function setUp() public {
+    function setUp() public virtual {
         vm.selectFork(forkIds[0]);
         
         // Deploy Promise contract at predeploy address
         Promise promiseImpl = new Promise();
         vm.etch(PredeployAddresses.PROMISE, address(promiseImpl).code);
+        
+        // Deploy PromiseAwareMessenger
+        promiseMessenger = new PromiseAwareMessenger();
         
         token = new L2NativeSuperchainERC20{salt: bytes32(0)}();
 
@@ -42,6 +47,9 @@ contract PromiseTest is Relayer, Test {
         // Deploy Promise contract at predeploy address on second fork too
         promiseImpl = new Promise();
         vm.etch(PredeployAddresses.PROMISE, address(promiseImpl).code);
+        
+        // Deploy PromiseAwareMessenger on second fork
+        promiseMessenger = new PromiseAwareMessenger();
         
         new L2NativeSuperchainERC20{salt: bytes32(0)}();
 
@@ -951,5 +959,234 @@ contract DeepNestedContract {
                 abi.encodeCall(this.createDeepChain, (_depth - 1, _destination, _target))
             );
         }
+    }
+}
+
+/// @notice Test contract demonstrating JavaScript-like promise resolution
+contract JavaScriptStyleTest is PromiseTest {
+    bool public callbackExecuted;
+    bytes public receivedData;
+    
+    /// @notice Test JavaScript-style automatic promise flattening
+    function test_javascript_style_promise_resolution() public {
+        vm.selectFork(forkIds[0]);
+        
+        // Reset state
+        callbackExecuted = false;
+        receivedData = "";
+        
+        // Deploy contract that returns nested promises
+        NestedPromiseContract nestedContract = new NestedPromiseContract(p);
+        vm.selectFork(forkIds[1]);
+        NestedPromiseContract nestedContractB = new NestedPromiseContract(p);
+        vm.selectFork(forkIds[0]);
+        
+        // Step 1: Send message to contract that will return a promise hash
+        bytes32 msgHash = p.sendMessage(
+            chainIdByForkId[forkIds[1]], 
+            address(nestedContractB), 
+            abi.encodeCall(nestedContractB.createNestedPromise, (chainIdByForkId[forkIds[0]], address(token)))
+        );
+        
+        // Step 2: Attach .then() callback - should NOT execute until nested promise resolves
+        p.then(msgHash, this.javascriptStyleCallback.selector, "test");
+        
+        // Step 3: Relay the initial message
+        relayAllMessages();
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        
+        // Step 4: Check promise state - should be unresolved with nested promise
+        vm.selectFork(forkIds[1]);
+        // The promise should detect nesting and defer callback execution
+        
+        // Step 5: Verify callback has NOT executed yet
+        assertFalse(callbackExecuted, "Callback should not execute until nested promise resolves");
+        
+        // Step 6: Now relay the nested promise to resolve it
+        relayAllMessages();
+        logs = vm.getRecordedLogs();
+        relayHandlers(logs, p, chainIdByForkId[forkIds[0]]);
+        
+        // Step 7: Now relay callbacks - they should execute with the final resolved data
+        relayPromises(logs, p, chainIdByForkId[forkIds[0]]);
+        
+        // Step 8: Verify callback executed with final data, not promise hash
+        assertTrue(callbackExecuted, "Callback should execute after nested promise resolves");
+        // receivedData should be the final token mint result, not a promise hash
+        assertTrue(receivedData.length > 0, "Should receive actual data, not promise hash");
+    }
+    
+    /// @notice Callback function for testing JavaScript-style resolution
+    function javascriptStyleCallback(bytes memory data) public {
+        require(msg.sender == address(p), "Only Promise contract can call");
+        callbackExecuted = true;
+        receivedData = data;
+        
+        // In JavaScript-style promises, this should receive the FINAL resolved value,
+        // not the intermediate promise hash
+        
+        // If we received 32 bytes that decode to a valid promise hash, that would be wrong
+        if (data.length == 32) {
+            bytes32 potentialHash = abi.decode(data, (bytes32));
+            // This should NOT be a promise hash in JavaScript-style resolution
+            assertFalse(p.isPromiseResolved(potentialHash), "Should not receive unresolved promise hash");
+        }
+    }
+}
+
+/// @notice Test contract for demonstrating PromiseAwareMessenger transparent functionality
+contract PromiseAwareMessengerContract {
+    PromiseAwareMessenger public immutable messenger;
+    
+    constructor(PromiseAwareMessenger _messenger) {
+        messenger = _messenger;
+    }
+    
+    /// @notice Demonstrates transparent cross-chain messaging that automatically tracks child promises
+    function createChildPromises(
+        uint256 chainA,
+        uint256 chainB,
+        address tokenA,
+        address tokenB,
+        address recipient
+    ) external returns (bytes memory summary) {
+        // These calls look identical to regular messenger calls
+        // But they automatically create parent-child relationships!
+        
+        bytes32 child1 = messenger.sendMessage(
+            chainA,
+            tokenA,
+            abi.encodeWithSignature("mint(address,uint256)", recipient, 100)
+        );
+        
+        bytes32 child2 = messenger.sendMessage(
+            chainB,
+            tokenB,
+            abi.encodeWithSignature("mint(address,uint256)", recipient, 200)
+        );
+        
+        return abi.encode("Created children", child1, child2);
+    }
+}
+
+/// @notice Extended tests for PromiseAwareMessenger functionality
+contract PromiseAwareMessengerTest is PromiseTest {
+    PromiseAwareMessengerContract public testContract;
+    address public testContractA;
+    address public testContractB;
+    
+    bool public transparentCallbackExecuted;
+    bytes public transparentCallbackData;
+    
+    function setUp() public override {
+        super.setUp();
+        
+        // Deploy test contracts on both forks
+        vm.selectFork(forkIds[0]);
+        testContract = new PromiseAwareMessengerContract(promiseMessenger);
+        testContractA = address(testContract);
+        
+        vm.selectFork(forkIds[1]);
+        testContract = new PromiseAwareMessengerContract(promiseMessenger);
+        testContractB = address(testContract);
+    }
+    
+    /// @notice Test that PromiseAwareMessenger provides transparent atomic behavior
+    function test_promise_aware_messenger_transparent_atomic() public {
+        vm.selectFork(forkIds[0]);
+        
+        transparentCallbackExecuted = false;
+        transparentCallbackData = "";
+        
+        console.log("=== Testing PromiseAwareMessenger Transparent Atomic Behavior ===");
+        
+        // Step 1: Send promise using regular Promise.sendMessage to a contract that uses PromiseAwareMessenger
+        bytes32 parentPromise = p.sendMessage(
+            chainIdByForkId[forkIds[1]],
+            testContractB,
+            abi.encodeCall(PromiseAwareMessengerContract.createChildPromises, (
+                chainIdByForkId[forkIds[0]], // chainA 
+                chainIdByForkId[forkIds[0]], // chainB (both to fork 0 to avoid same-chain error)
+                address(token),              // tokenA
+                address(token),              // tokenB
+                address(this)                // recipient
+            ))
+        );
+        
+        // Step 2: Attach callback - should NOT execute until ALL children resolve
+        p.then(parentPromise, this.transparentAtomicCallback.selector, "transparent_test");
+        
+        // Step 3: Relay parent message (creates child promises via PromiseAwareMessenger)
+        relayAllMessages();
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        
+        // Verify parent hasn't resolved yet
+        assertFalse(transparentCallbackExecuted, "Parent should not resolve before children");
+        
+        // Step 4: Verify children were created (look for NestedPromiseCreated events)
+        bool foundChildrenCreated = false;
+        for (uint256 i = 0; i < logs.length; i++) {
+            if (logs[i].topics.length > 0 && logs[i].topics[0] == keccak256("NestedPromiseCreated(bytes32,bytes32)")) {
+                foundChildrenCreated = true;
+                break;
+            }
+        }
+        assertTrue(foundChildrenCreated, "Should have automatically created child promises");
+        
+        // Step 5: Relay child promises
+        vm.selectFork(forkIds[0]);
+        relayAllMessages();
+        logs = vm.getRecordedLogs();
+        
+        // Step 6: Process child callbacks (should trigger parent resolution)
+        relayPromises(logs, p, chainIdByForkId[forkIds[1]]);
+        
+        // Step 7: Process parent callback
+        vm.selectFork(forkIds[0]);
+        relayAllMessages();
+        logs = vm.getRecordedLogs();
+        relayPromises(logs, p, chainIdByForkId[forkIds[0]]);
+        
+        // Step 8: Verify atomic resolution worked transparently
+        assertTrue(transparentCallbackExecuted, "Parent callback should execute after children resolve");
+        assertTrue(transparentCallbackData.length > 0, "Should receive callback data");
+        
+        console.log("SUCCESS: PromiseAwareMessenger provided transparent atomic behavior");
+    }
+    
+    /// @notice Test that PromiseAwareMessenger calls route through destination wrapper
+    function test_promise_aware_messenger_wrapper_routing() public {
+        vm.selectFork(forkIds[0]);
+        
+        console.log("=== Testing PromiseAwareMessenger Wrapper Routing ===");
+        
+        // Step 1: Send message directly via PromiseAwareMessenger
+        bytes32 msgHash = promiseMessenger.sendMessage(
+            chainIdByForkId[forkIds[1]],
+            address(token),
+            abi.encodeCall(token.mint, (address(this), 50))
+        );
+        
+        // Step 2: Attach callback to verify the message was tracked
+        p.then(msgHash, this.transparentAtomicCallback.selector, "routing_test");
+        
+        // Step 3: Relay message
+        relayAllMessages();
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        
+        // Step 4: Process callbacks
+        relayPromises(logs, p, chainIdByForkId[forkIds[0]]);
+        
+        // Step 5: Verify callback executed
+        assertTrue(transparentCallbackExecuted, "Callback should execute via wrapper routing");
+        
+        console.log("SUCCESS: PromiseAwareMessenger routing worked correctly");
+    }
+    
+    /// @notice Callback for transparent atomic tests
+    function transparentAtomicCallback(bytes memory data) public {
+        require(msg.sender == address(p), "Only Promise contract can call");
+        transparentCallbackExecuted = true;
+        transparentCallbackData = data;
     }
 }

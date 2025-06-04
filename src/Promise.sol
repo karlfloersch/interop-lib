@@ -46,6 +46,12 @@ contract Promise is TransientReentrancyAware {
     /// @notice the context that is being propagated with the promise
     bytes internal currentContext;
 
+    /// @notice the currently executing promise context for tracking child promises
+    bytes32 internal currentPromiseContext;
+
+    /// @notice whether we're currently executing within a promise context
+    bool internal inPromiseExecution;
+
     /// @notice a mapping of message sent by this library. To prevent callbacks being registered to messages
     ///         sent directly to the L2ToL2CrossDomainMessenger which does not emit the return value (yet)
     mapping(bytes32 => bool) private sentMessages;
@@ -63,6 +69,31 @@ contract Promise is TransientReentrancyAware {
         bytes message;
         uint256 sourceChain;
     }
+
+    /// @notice struct to track promise resolution state
+    struct PromiseState {
+        bool isResolved;        // Whether this promise is fully resolved (no more nesting)
+        bytes finalReturnData; // The final resolved data (only set when isResolved = true)
+        bytes32 nestedPromise; // If not resolved, points to the nested promise
+        bool hasCallbacks;     // Whether this promise has pending callbacks
+        bool isCompleted;      // Whether the immediate call completed (vs fully resolved)
+        bytes32[] childPromises; // All direct child promises created by this promise
+        bytes32 parentPromise;   // The parent promise that created this one
+        uint256 unresolvedChildCount; // Number of children that haven't resolved yet
+        bool resolutionBlocked;  // Whether this promise is waiting for children to resolve
+    }
+
+    /// @notice a mapping to track promise resolution states for automatic flattening
+    mapping(bytes32 => PromiseState) public promiseStates;
+
+    /// @notice mapping to track which chain each promise lives on (renamed to avoid conflict)
+    mapping(bytes32 => uint256) public promiseOriginChains;
+
+    /// @notice mapping to track promise resolution dependencies
+    mapping(bytes32 => bytes32[]) public promiseDependencies;
+
+    /// @notice mapping to track promises waiting for resolution notifications
+    mapping(bytes32 => bytes32[]) public resolutionWaiters;
 
     /// @notice an event emitted when a callback is registered
     event CallbackRegistered(bytes32 messageHash);
@@ -110,15 +141,35 @@ contract Promise is TransientReentrancyAware {
             sourceChain: block.chainid
         });
         
+        // 🆕 AUTOMATIC CHILD TRACKING: If we're currently executing within a promise context, 
+        // automatically track this as a child promise
+        if (inPromiseExecution && currentPromiseContext != bytes32(0)) {
+            _addChildPromise(currentPromiseContext, msgHash);
+        }
+        
+        return msgHash;
+    }
+
+    /// @notice Promise-aware sendMessage that tracks parent-child relationships for atomic resolution
+    /// @dev This function should be used by contracts that want their sendMessage calls to be tracked as child promises
+    /// @param _destination The destination chain ID
+    /// @param _target The target contract address
+    /// @param _message The message to send
+    /// @return msgHash The hash of the sent message
+    function sendChildMessage(uint256 _destination, address _target, bytes calldata _message) external returns (bytes32) {
+        bytes32 msgHash = this.sendMessage(_destination, _target, _message);
+        
+        // If we're currently executing within a promise context, track this as a child promise
+        if (inPromiseExecution && currentPromiseContext != bytes32(0)) {
+            _addChildPromise(currentPromiseContext, msgHash);
+        }
+        
         return msgHash;
     }
 
     /// @dev handler to dispatch and emit the return value of a message
     function handleMessage(uint256 _nonce, address _target, bytes calldata _message) external onlyCrossDomainCallback {
-        (bool success, bytes memory returnData_) = _target.call(_message);
-        require(success, "Promise: target call failed");
-
-        // reconstruct the L2ToL2CrossDomainMessenger message hash
+        // Set promise execution context
         bytes32 messageHash = Hashing.hashL2toL2CrossDomainMessage({
             _destination: block.chainid,
             _source: messenger.crossDomainMessageSource(),
@@ -127,8 +178,80 @@ contract Promise is TransientReentrancyAware {
             _target: address(this),
             _message: abi.encodeCall(this.handleMessage, (_nonce, _target, _message))
         });
+        
+        // Set the execution context for tracking child promises
+        currentPromiseContext = messageHash;
+        inPromiseExecution = true;
+        
+        (bool success, bytes memory returnData_) = _target.call(_message);
+        require(success, "Promise: target call failed");
 
-        emit RelayedMessage(messageHash, returnData_);
+        // Check current child count BEFORE clearing context
+        PromiseState storage tempState = promiseStates[messageHash];
+
+        // Clear execution context
+        inPromiseExecution = false;
+        currentPromiseContext = bytes32(0);
+
+        // 🆕 Enhanced: Check if return data represents a nested promise
+        bool isNestedPromise = false;
+        bytes32 nestedPromiseHash = bytes32(0);
+        
+        if (returnData_.length == 32) {
+            bytes32 potentialPromiseHash = abi.decode(returnData_, (bytes32));
+            if (sentMessages[potentialPromiseHash]) {
+                isNestedPromise = true;
+                nestedPromiseHash = potentialPromiseHash;
+            }
+        }
+
+        if (isNestedPromise) {
+            // 🆕 Deferred resolution: Don't emit RelayedMessage yet
+            // Store the promise state as unresolved with nested promise
+            promiseStates[messageHash] = PromiseState({
+                isResolved: false,
+                finalReturnData: "",
+                nestedPromise: nestedPromiseHash,
+                hasCallbacks: callbacks[messageHash].length > 0,
+                isCompleted: true, // The immediate call completed, but waiting for children
+                childPromises: new bytes32[](0),
+                parentPromise: bytes32(0),
+                unresolvedChildCount: 0,
+                resolutionBlocked: true // Blocked until nested promise resolves
+            });
+            
+            // Track the nested promise as a child
+            _addChildPromise(messageHash, nestedPromiseHash);
+        } else {
+            // Check if this promise has any children that were created during execution
+            PromiseState storage state = promiseStates[messageHash];
+            
+            // Initialize state if it doesn't exist, BUT preserve child tracking
+            if (!state.isCompleted) {
+                // Don't overwrite existing child tracking!
+                uint256 currentChildCount = state.unresolvedChildCount;
+                
+                state.isResolved = false;
+                state.finalReturnData = returnData_;
+                state.nestedPromise = bytes32(0);
+                state.hasCallbacks = callbacks[messageHash].length > 0;
+                state.isCompleted = true;
+                // Keep existing child tracking
+                state.unresolvedChildCount = currentChildCount;
+                // childPromises array is already set
+                state.resolutionBlocked = (currentChildCount > 0);
+            } else {
+                // Mark as completed and store return data
+                state.isCompleted = true;
+                state.finalReturnData = returnData_;
+            }
+            
+            // If no unresolved children, resolve atomically
+            if (state.unresolvedChildCount == 0) {
+                _resolvePromiseAtomically(messageHash);
+            }
+            // Otherwise, wait for children to resolve
+        }
 
         // Execute any pending handles on the destination chain
         Handle[] storage pendingHandleList = pendingHandles[messageHash];
@@ -182,8 +305,8 @@ contract Promise is TransientReentrancyAware {
         emit CallbackRegistered(_msgHash);
     }
 
-    /// @notice invoke continuations present on the completion of a remote message. for now this requires all
-    ///         callbacks to be dispatched in a single call. A failing callback will halt the entire process.
+    /// @notice Enhanced callback dispatch that supports automatic promise resolution
+    /// @dev This function now checks if promises are fully resolved before executing callbacks
     function dispatchCallbacks(Identifier calldata _id, bytes calldata _payload) external payable nonReentrant {
         require(_id.origin == address(this), "Promise: invalid origin");
         ICrossL2Inbox(PredeployAddresses.CROSS_L2_INBOX).validateMessage(_id, keccak256(_payload));
@@ -194,24 +317,53 @@ contract Promise is TransientReentrancyAware {
         currentRelayIdentifier = _id;
 
         (bytes32 msgHash, bytes memory returnData) = abi.decode(_payload[32:], (bytes32, bytes));
-        for (uint256 i = 0; i < callbacks[msgHash].length; i++) {
-            Callback memory callback = callbacks[msgHash][i];
-            if (callback.context.length > 0) {
-                currentContext = callback.context;
+        
+        // 🆕 Enhanced: Check if this resolves a parent promise that was waiting for nested resolution
+        _resolveParentPromises(msgHash, returnData);
+        
+        // 🆕 Enhanced: Check promise resolution state
+        PromiseState storage state = promiseStates[msgHash];
+        
+        // 🔧 BACKWARD COMPATIBILITY: If no state exists, treat as resolved (old behavior)
+        bool isResolved = state.nestedPromise == bytes32(0) || state.isResolved;
+        bytes memory finalData = state.isResolved ? state.finalReturnData : returnData;
+        
+        if (isResolved && callbacks[msgHash].length > 0) {
+            // Execute callbacks with the final resolved data
+            for (uint256 i = 0; i < callbacks[msgHash].length; i++) {
+                Callback memory callback = callbacks[msgHash][i];
+                if (callback.context.length > 0) {
+                    currentContext = callback.context;
+                }
+
+                (bool completed,) = callback.target.call(abi.encodePacked(callback.selector, finalData));
+                require(completed, "Promise: callback call failed");
+
+                if (callback.context.length > 0) {
+                    delete currentContext;
+                }
             }
 
-            (bool completed,) = callback.target.call(abi.encodePacked(callback.selector, returnData));
-            require(completed, "Promise: callback call failed");
+            emit CallbacksCompleted(msgHash);
 
-            if (callback.context.length > 0) {
-                delete currentContext;
+            // storage cleanup
+            delete callbacks[msgHash];
+            if (state.nestedPromise != bytes32(0)) {
+                delete promiseStates[msgHash];
             }
+        } else if (!isResolved) {
+            // Promise is still waiting for nested resolution - callbacks will execute later
+            // Update the return data for when it does resolve
+            _updateNestedPromiseResolution(msgHash, returnData);
+        } else {
+            // Promise is resolved but has no callbacks - just emit completion
+            emit CallbacksCompleted(msgHash);
         }
 
-        emit CallbacksCompleted(msgHash);
+        // 🆕 ATOMIC RESOLUTION: Notify parent if this promise has one
+        // This is crucial for atomic promise resolution
+        _notifyParentOfResolution(msgHash);
 
-        // storage cleanup
-        delete callbacks[msgHash];
         delete sentMessages[msgHash];
         delete currentRelayIdentifier;
     }
@@ -426,5 +578,179 @@ contract Promise is TransientReentrancyAware {
         emit NestedPromiseCreated(_handleHash, nestedPromiseHash);
         
         return nestedPromiseHash;
+    }
+
+    /// @notice Internal function to start the nested promise resolution process
+    /// @param parentPromise The parent promise that returned a nested promise
+    /// @param nestedPromise The nested promise to resolve
+    function _startNestedResolution(bytes32 parentPromise, bytes32 nestedPromise) internal {
+        // Register a callback on the nested promise to resolve the parent when it completes
+        // This creates a chain: nested promise resolves -> parent promise resolves -> parent callbacks execute
+        
+        // We store the parent-child relationship for resolution tracking
+        // When the nested promise resolves, we'll check if it needs further resolution
+        
+        emit NestedPromiseCreated(parentPromise, nestedPromise);
+    }
+
+    /// @notice Internal function to check if this promise resolution resolves any parent promises
+    /// @param resolvedPromise The promise that just resolved
+    /// @param returnData The return data from the resolved promise
+    function _resolveParentPromises(bytes32 resolvedPromise, bytes memory returnData) internal {
+        // Look for parent promises that were waiting for this nested promise to resolve
+        // This is a simplified version - a full implementation would need efficient parent->child tracking
+        
+        // For now, we iterate through promise states to find parents
+        // In production, you'd want a more efficient data structure
+        // This is conceptual - would need optimization
+    }
+
+    /// @notice Internal function to update nested promise resolution
+    /// @param parentPromise The parent promise 
+    /// @param nestedReturnData The return data from nested promise
+    function _updateNestedPromiseResolution(bytes32 parentPromise, bytes memory nestedReturnData) internal {
+        PromiseState storage parentState = promiseStates[parentPromise];
+        
+        // Check if the nested return data is itself another promise
+        if (nestedReturnData.length == 32) {
+            bytes32 potentialNestedPromise = abi.decode(nestedReturnData, (bytes32));
+            if (sentMessages[potentialNestedPromise]) {
+                // Still nested - update the nested promise pointer
+                parentState.nestedPromise = potentialNestedPromise;
+                emit NestedPromiseCreated(parentPromise, potentialNestedPromise);
+                return;
+            }
+        }
+        
+        // No further nesting - mark as resolved
+        parentState.isResolved = true;
+        parentState.finalReturnData = nestedReturnData;
+        parentState.nestedPromise = bytes32(0);
+        
+        // Emit the delayed RelayedMessage for this promise
+        emit RelayedMessage(parentPromise, nestedReturnData);
+        
+        // If this promise had callbacks waiting, they will execute in the next dispatchCallbacks call
+    }
+
+    /// @notice Get the current resolution state of a promise
+    /// @param _promiseHash The promise hash to check
+    /// @return state The current promise state
+    function getPromiseState(bytes32 _promiseHash) external view returns (PromiseState memory) {
+        return promiseStates[_promiseHash];
+    }
+
+    /// @notice Check if a promise is fully resolved (no more nested promises)
+    /// @param _promiseHash The promise hash to check
+    /// @return resolved Whether the promise is fully resolved
+    function isPromiseResolved(bytes32 _promiseHash) external view returns (bool) {
+        return promiseStates[_promiseHash].isResolved;
+    }
+
+    /// @notice Internal function to add a child promise to a parent's tracking
+    /// @param parentPromise The parent promise hash
+    /// @param childPromise The child promise hash that was just created
+    function _addChildPromise(bytes32 parentPromise, bytes32 childPromise) internal {
+        // Add to parent's children list
+        promiseStates[parentPromise].childPromises.push(childPromise);
+        promiseStates[parentPromise].unresolvedChildCount++;
+        promiseStates[parentPromise].resolutionBlocked = true;
+        
+        // Set child's parent
+        promiseStates[childPromise].parentPromise = parentPromise;
+        
+        // Track chain location
+        promiseOriginChains[childPromise] = block.chainid;
+        
+        // Add to legacy tracking for backward compatibility
+        promiseChains[parentPromise].push(childPromise);
+        
+        emit NestedPromiseCreated(parentPromise, childPromise);
+    }
+
+    /// @notice Internal function to notify parent promises when a child resolves
+    /// @param resolvedPromise The promise that just resolved
+    function _notifyParentOfResolution(bytes32 resolvedPromise) internal {
+        PromiseState storage resolvedState = promiseStates[resolvedPromise];
+        bytes32 parentPromise = resolvedState.parentPromise;
+        
+        if (parentPromise != bytes32(0)) {
+            PromiseState storage parentState = promiseStates[parentPromise];
+            
+            // Decrease parent's unresolved child count
+            if (parentState.unresolvedChildCount > 0) {
+                parentState.unresolvedChildCount--;
+                
+                // If parent has no more unresolved children and is itself completed, it can now resolve
+                if (parentState.unresolvedChildCount == 0 && parentState.isCompleted) {
+                    _resolvePromiseAtomically(parentPromise);
+                }
+            }
+        }
+    }
+
+    /// @notice Internal function to atomically resolve a promise once all children are resolved
+    /// @param promiseHash The promise to resolve
+    function _resolvePromiseAtomically(bytes32 promiseHash) internal {
+        PromiseState storage state = promiseStates[promiseHash];
+        
+        // Mark as fully resolved
+        state.isResolved = true;
+        state.resolutionBlocked = false;
+        
+        // Emit the delayed RelayedMessage
+        emit RelayedMessage(promiseHash, state.finalReturnData);
+        
+        // Emit resolution event
+        emit NestedPromiseResolved(promiseHash, keccak256(state.finalReturnData));
+        
+        // Notify parent if this promise has one
+        _notifyParentOfResolution(promiseHash);
+        
+        // If on a different chain, send cross-chain notification to parent
+        if (state.parentPromise != bytes32(0)) {
+            uint256 parentChain = promiseOriginChains[state.parentPromise];
+            if (parentChain != 0 && parentChain != block.chainid) {
+                // Send cross-chain notification to parent chain
+                messenger.sendMessage(
+                    parentChain,
+                    address(this),
+                    abi.encodeCall(this.notifyParentPromiseResolution, (state.parentPromise, promiseHash))
+                );
+            }
+        }
+    }
+
+    /// @notice Cross-chain function to notify a parent promise that its child has resolved
+    /// @param parentPromise The parent promise hash
+    /// @param childPromise The child promise that resolved
+    function notifyParentPromiseResolution(bytes32 parentPromise, bytes32 childPromise) external onlyCrossDomainCallback {
+        _notifyParentOfResolution(childPromise);
+    }
+
+    /// @notice Automatically track a child promise if called during promise execution
+    /// @dev Called by PromiseAwareMessenger to automatically track child promises
+    /// @param childPromiseHash The hash of the child promise to track
+    function autoTrackChildPromise(bytes32 childPromiseHash) external {
+        // If we're currently executing within a promise context, track this as a child promise
+        if (inPromiseExecution && currentPromiseContext != bytes32(0)) {
+            _addChildPromise(currentPromiseContext, childPromiseHash);
+        }
+        
+        // If not in promise context, this is a no-op (normal cross-domain message)
+    }
+
+    /// @notice Check if we're currently in promise execution context
+    /// @dev Used by PromiseAwareMessenger to determine if tracking is needed
+    /// @return inContext Whether we're currently executing within a promise
+    function inPromiseExecutionContext() external view returns (bool) {
+        return inPromiseExecution;
+    }
+
+    /// @notice Get the current promise context
+    /// @dev Used for debugging and testing
+    /// @return contextHash The current promise being executed
+    function getCurrentPromiseContext() external view returns (bytes32) {
+        return currentPromiseContext;
     }
 }
