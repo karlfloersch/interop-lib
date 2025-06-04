@@ -170,6 +170,45 @@ contract PromiseTest is Relayer, Test {
         // will be enhanced in Phase 2 to actually execute destination-side logic
     }
 
+    function test_handle_completion_execution() public {
+        vm.selectFork(forkIds[0]);
+
+        // Reset state for this test
+        handlerCalled = false;
+
+        // Step 1: Send initial message (A→B: query balance)
+        bytes32 msgHash = p.sendMessage(
+            chainIdByForkId[forkIds[1]], address(token), abi.encodeCall(IERC20.balanceOf, (address(this)))
+        );
+
+        // Step 2: Attach destination-side continuation (andThen: mint tokens on B)
+        Handle memory handle = p.andThen(
+            msgHash,
+            address(token),
+            abi.encodeCall(token.mint, (address(this), 50))
+        );
+
+        // Verify handle is not completed initially
+        assertFalse(p.isHandleCompleted(handle.messageHash));
+
+        // Step 3: Relay the initial message (A→B) - this should trigger handle execution
+        relayAllMessages();
+
+        // Step 4: Check handle completion on the destination chain (B)
+        vm.selectFork(forkIds[1]);
+        
+        // The handle should now be completed
+        assertTrue(p.isHandleCompleted(handle.messageHash));
+        
+        // Get the completed handle to check return data
+        Handle memory completedHandle = p.getHandle(handle.messageHash);
+        assertTrue(completedHandle.completed);
+        assertTrue(completedHandle.returnData.length > 0);
+        
+        // Verify the mint actually happened (token balance should be 150 = 100 initial + 50 minted)
+        assertEq(token.balanceOf(address(this)), 150);
+    }
+
     function balanceHandler(uint256 balance) public async {
         handlerCalled = true;
         require(balance == 100, "PromiseTest: balance mismatch");

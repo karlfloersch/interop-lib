@@ -15,6 +15,8 @@ struct Callback {
 struct Handle {
     bytes32 messageHash;
     uint256 destinationChain;
+    address target;
+    bytes message;
     bool completed;
     bytes returnData;
 }
@@ -36,6 +38,9 @@ interface IPromise {
 
     /// @notice an event emitted when a handle is created for destination-side execution
     event HandleCreated(bytes32 messageHash, uint256 destinationChain);
+
+    /// @notice an event emitted when a handle is completed with return data
+    event HandleCompleted(bytes32 handleHash, bytes returnData);
 
     /// @notice send a message to the destination contract capturing the return value. this cannot call
     ///         contracts that rely on the L2ToL2CrossDomainMessenger, such as the SuperchainTokenBridge.

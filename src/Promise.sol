@@ -27,6 +27,9 @@ contract Promise is TransientReentrancyAware {
     /// @notice a mapping to track destination-side promise handles
     mapping(bytes32 => Handle) public handles;
 
+    /// @notice a mapping from message hash to handle hashes for handle execution
+    mapping(bytes32 => bytes32[]) public messageToHandles;
+
     /// @notice the relay identifier that is satisfying the promise
     Identifier internal currentRelayIdentifier;
 
@@ -48,6 +51,9 @@ contract Promise is TransientReentrancyAware {
 
     /// @notice an event emitted when a handle is created for destination-side execution
     event HandleCreated(bytes32 messageHash, uint256 destinationChain);
+
+    /// @notice an event emitted when a handle is completed with return data
+    event HandleCompleted(bytes32 handleHash, bytes returnData);
 
     /// @dev Modifier to restrict a function to only be a cross domain callback into this contract
     modifier onlyCrossDomainCallback() {
@@ -83,6 +89,24 @@ contract Promise is TransientReentrancyAware {
         });
 
         emit RelayedMessage(messageHash, returnData_);
+
+        // Execute any associated handles for destination-side continuations
+        bytes32[] storage handleHashes = messageToHandles[messageHash];
+        for (uint256 i = 0; i < handleHashes.length; i++) {
+            bytes32 handleHash = handleHashes[i];
+            Handle storage handle = handles[handleHash];
+            
+            if (!handle.completed) {
+                // Execute the destination-side continuation
+                (bool handleSuccess, bytes memory handleReturnData) = handle.target.call(handle.message);
+                if (handleSuccess) {
+                    handle.completed = true;
+                    handle.returnData = handleReturnData;
+                    emit HandleCompleted(handleHash, handleReturnData);
+                }
+                // Note: we don't revert on handle failure to avoid breaking the main message flow
+            }
+        }
     }
 
     /// @notice attach a continuation dependent only on the return value of the remote message
@@ -157,11 +181,14 @@ contract Promise is TransientReentrancyAware {
         Handle memory handle = Handle({
             messageHash: handleHash,
             destinationChain: block.chainid,
+            target: _target,
+            message: _message,
             completed: false,
             returnData: ""
         });
         
         handles[handleHash] = handle;
+        messageToHandles[_msgHash].push(handleHash);
         emit HandleCreated(handleHash, block.chainid);
         
         return handle;
