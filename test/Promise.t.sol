@@ -191,7 +191,8 @@ contract PromiseTest is Relayer, Test {
         // Verify handle is not completed initially
         assertFalse(p.isHandleCompleted(handle.messageHash));
 
-        // Step 3: Relay the initial message (A→B) - this should trigger handle execution
+        // Step 3: Relay ALL messages (including handle registration) 
+        // This ensures handles are registered on destination before original message executes
         relayAllMessages();
 
         // Step 4: Check handle completion on the destination chain (B)
@@ -207,6 +208,36 @@ contract PromiseTest is Relayer, Test {
         
         // Verify the mint actually happened (token balance should be 150 = 100 initial + 50 minted)
         assertEq(token.balanceOf(address(this)), 150);
+    }
+
+    function test_cross_chain_handle_registration() public {
+        vm.selectFork(forkIds[0]);
+
+        // Step 1: Send initial message (A→B: query balance)
+        bytes32 msgHash = p.sendMessage(
+            chainIdByForkId[forkIds[1]], address(token), abi.encodeCall(IERC20.balanceOf, (address(this)))
+        );
+
+        // Step 2: Attach destination-side continuation (andThen: mint tokens on B)
+        // This should send a cross-chain message to register the handle on chain B
+        Handle memory handle = p.andThen(
+            msgHash,
+            address(token),
+            abi.encodeCall(token.mint, (address(this), 50))
+        );
+
+        // Verify no pending handles on source chain (they should be sent to destination)
+        Handle[] memory pendingOnSource = p.getPendingHandles(msgHash);
+        assertEq(pendingOnSource.length, 0);
+
+        // Step 3: Relay all messages (including handle registration)
+        relayAllMessages();
+
+        // Step 4: Check that handles were registered on destination chain (B)
+        vm.selectFork(forkIds[1]);
+        Handle[] memory pendingOnDest = p.getPendingHandles(msgHash);
+        assertEq(pendingOnDest.length, 1);
+        assertEq(pendingOnDest[0].target, address(token));
     }
 
     function balanceHandler(uint256 balance) public async {

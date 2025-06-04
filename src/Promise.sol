@@ -43,6 +43,9 @@ contract Promise is TransientReentrancyAware {
     ///         sent directly to the L2ToL2CrossDomainMessenger which does not emit the return value (yet)
     mapping(bytes32 => bool) private sentMessages;
 
+    /// @notice a mapping to track destination chains for sent messages
+    mapping(bytes32 => uint256) private messageDestinations;
+
     /// @notice an event emitted when a callback is registered
     event CallbackRegistered(bytes32 messageHash);
 
@@ -73,6 +76,7 @@ contract Promise is TransientReentrancyAware {
             _destination, address(this), abi.encodeCall(this.handleMessage, (nonce, _target, _message))
         );
         sentMessages[msgHash] = true;
+        messageDestinations[msgHash] = _destination;
         return msgHash;
     }
 
@@ -184,18 +188,25 @@ contract Promise is TransientReentrancyAware {
         // Generate a unique handle hash for this destination callback
         bytes32 handleHash = keccak256(abi.encodePacked(_msgHash, _target, _message, block.timestamp));
         
-        // Create handle intent (will be materialized on destination chain)
+        // Create handle intent
         Handle memory handle = Handle({
             messageHash: handleHash,
-            destinationChain: block.chainid, // This will be updated during relay
+            destinationChain: block.chainid,
             target: _target,
             message: _message,
             completed: false,
             returnData: ""
         });
         
-        // Store as pending handle for cross-chain execution
-        pendingHandles[_msgHash].push(handle);
+        // Send cross-chain message to register handle on destination chain
+        // We need to determine the destination chain from the original message
+        // For now, we'll send to the same destination as the original message
+        messenger.sendMessage(
+            messageDestinations[_msgHash], // Send to the same destination as the original message
+            address(this),
+            abi.encodeCall(this.registerHandle, (_msgHash, handle))
+        );
+        
         emit HandleCreated(handleHash, block.chainid);
         
         return handle;
@@ -220,5 +231,12 @@ contract Promise is TransientReentrancyAware {
     /// @return handles Array of pending handles
     function getPendingHandles(bytes32 _msgHash) external view returns (Handle[] memory) {
         return pendingHandles[_msgHash];
+    }
+
+    /// @notice register a handle on the destination chain (called via cross-chain message)
+    /// @param _msgHash The original message hash this handle is associated with
+    /// @param _handle The handle to register
+    function registerHandle(bytes32 _msgHash, Handle calldata _handle) external onlyCrossDomainCallback {
+        pendingHandles[_msgHash].push(_handle);
     }
 }
