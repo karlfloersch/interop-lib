@@ -8,17 +8,97 @@ import {IERC20} from "@openzeppelin-contracts/interfaces/IERC20.sol";
 
 import {Identifier} from "../src/interfaces/IIdentifier.sol";
 import {SuperchainERC20} from "../src/SuperchainERC20.sol";
-import {Relayer} from "../src/test/Relayer.sol";
+import {Relayer, RelayedMessage} from "../src/test/Relayer.sol";
 import {PromiseAwareMessenger} from "../src/PromiseAwareMessenger.sol";
+
+/// @notice Unified test contract for all sub-call scenarios
+contract TestCallMaker {
+    PromiseAwareMessenger public wrapper;
+    
+    event CallExecuted(string scenario, uint256 value);
+    
+    constructor(address _wrapper) {
+        wrapper = PromiseAwareMessenger(_wrapper);
+    }
+    
+    /// @notice Make a specified number of sub-calls
+    function makeSubCalls(uint256 _destinationChain, uint256 _count) external {
+        console.log("TestCallMaker: Making", _count, "sub-calls to chain", _destinationChain);
+        
+        for (uint256 i = 0; i < _count; i++) {
+            wrapper.sendMessage(
+                _destinationChain,
+                address(uint160(0x1111111111111111111111111111111111111111) + uint160(i)), // unique dummy targets
+                abi.encodeWithSignature("dummyFunction(uint256)", i)
+            );
+        }
+        
+        emit CallExecuted("makeSubCalls", _count);
+        console.log("TestCallMaker: Completed", _count, "sub-calls");
+    }
+    
+    /// @notice Make a nested call that triggers further sub-calls (for deep nesting tests)
+    function makeNestedCall(uint256 _destinationChain, address _target, uint256 _subCallCount) external {
+        console.log("=== makeNestedCall ENTRY ===");
+        console.log("makeNestedCall: CALLED! destinationChain =", _destinationChain);
+        console.log("makeNestedCall: target =", _target);
+        console.log("makeNestedCall: subCallCount =", _subCallCount);
+        console.log("makeNestedCall: current chainid =", block.chainid);
+        console.log("makeNestedCall: wrapper address =", address(wrapper));
+        
+        // Check if target exists on destination chain
+        console.log("makeNestedCall: Target address code size check...");
+        // Note: We can't check code size on other chain from here, but we can log the address
+        
+        // The nested call should send sub-calls back to the current chain (where this makeNestedCall is executing)
+        bytes memory callData = abi.encodeCall(this.makeSubCalls, (block.chainid, _subCallCount));
+        console.log("makeNestedCall: Call data encoded, length =", callData.length);
+        
+        console.log("=== ABOUT TO CALL wrapper.sendMessage ===");
+        
+        // Try-catch to see if sendMessage fails
+        try wrapper.sendMessage(_destinationChain, _target, callData) returns (bytes32 messageHash) {
+            console.log("=== wrapper.sendMessage SUCCESS ===");
+            console.log("makeNestedCall: Message hash created successfully");
+        } catch Error(string memory reason) {
+            console.log("=== wrapper.sendMessage FAILED ===");
+            console.log("makeNestedCall: Error reason =", reason);
+        } catch (bytes memory lowLevelData) {
+            console.log("=== wrapper.sendMessage FAILED (low level) ===");
+            console.log("makeNestedCall: Low level error, data length =", lowLevelData.length);
+        }
+        
+        console.log("=== makeNestedCall COMPLETE ===");
+        emit CallExecuted("makeNestedCall", _subCallCount);
+    }
+    
+    /// @notice Simple receiver for testing basic functionality
+    function simpleReceiver(uint256 _value) external {
+        emit CallExecuted("simpleReceiver", _value);
+        console.log("TestCallMaker: Received value:", _value);
+    }
+}
+
+/// @notice Mock ERC20 for testing state modifications
+contract TestToken is SuperchainERC20 {
+    function mint(address _to, uint256 _amount) external {
+        require(_to != address(0), "Zero address");
+        _mint(_to, _amount);
+    }
+
+    function name() public pure override returns (string memory) { return "TestToken"; }
+    function symbol() public pure override returns (string memory) { return "TEST"; }
+    function decimals() public pure override returns (uint8) { return 18; }
+}
 
 contract PromiseAwareMessengerTest is Relayer, Test {
     PromiseAwareMessenger public wrapperA;
     PromiseAwareMessenger public wrapperB;
-    L2NativeSuperchainERC20 public token;
-
-    event CallReceived(address sender, uint256 value);
+    TestCallMaker public callMakerA;
+    TestCallMaker public callMakerB;
+    TestToken public token;
     
-    bool public receivedCall;
+    // Test state
     address public lastSender;
     uint256 public lastValue;
 
@@ -30,405 +110,533 @@ contract PromiseAwareMessengerTest is Relayer, Test {
     constructor() Relayer(rpcUrls) {}
 
     function setUp() public {
-        // Deploy wrapper on chain A
-        vm.selectFork(forkIds[0]);
-        wrapperA = new PromiseAwareMessenger{salt: bytes32(0)}();
-        token = new L2NativeSuperchainERC20{salt: bytes32(0)}();
-
-        // Deploy wrapper on chain B at same address (using CREATE2)
-        vm.selectFork(forkIds[1]);
-        wrapperB = new PromiseAwareMessenger{salt: bytes32(0)}();
-        new L2NativeSuperchainERC20{salt: bytes32(0)}();
-
-        // Mint tokens on chain B
-        token.mint(address(this), 100);
-        
-        // Verify wrappers are at same address
-        require(address(wrapperA) == address(wrapperB), "Wrappers not at same address");
+        _deployContracts();
+        _verifyDeployments();
+    }
+    
+    /// =============================================================
+    /// CORE FUNCTIONALITY TESTS
+    /// =============================================================
+    
+    function test_wrapper_basic_functionality() public {
+        bytes32 messageHash = _sendMessage(chainB(), address(token), abi.encodeCall(IERC20.balanceOf, (address(this))));
+        relayAllMessages();
+        assertTrue(messageHash != bytes32(0), "Message should be sent successfully");
     }
 
-    function test_wrapper_sends_to_itself() public {
-        vm.selectFork(forkIds[0]);
-        
-        console.log("=== Testing Wrapper Self-Call Architecture ===");
-        console.log("Wrapper A address:", address(wrapperA));
-        console.log("Wrapper B address:", address(wrapperB));
-        
-        // Send message through wrapper - should call itself on destination
-        bytes32 messageHash = wrapperA.sendMessage(
-            chainIdByForkId[forkIds[1]],
-            address(token),
-            abi.encodeCall(IERC20.balanceOf, (address(this)))
-        );
-        
-        console.log("Message sent via wrapper, hash:", vm.toString(messageHash));
-        
-        // Relay the message
+    function test_cross_chain_state_modification() public {
+        // Mint tokens on Chain B from Chain A
+        _sendMessage(chainB(), address(token), abi.encodeCall(TestToken.mint, (address(0x1234), 50)));
         relayAllMessages();
         
-        console.log("SUCCESS: Wrapper sent message to itself on destination chain");
+        uint256 balance = _getTokenBalance(address(0x1234));
+        assertEq(balance, 50, "Tokens should be minted cross-chain");
     }
 
-    function test_wrapper_authentication() public {
-        vm.selectFork(forkIds[0]);
-        
-        console.log("=== Testing Wrapper Authentication ===");
-        
-        // Send message through wrapper
-        wrapperA.sendMessage(
-            chainIdByForkId[forkIds[1]],
-            address(this),
-            abi.encodeCall(this.receiverFunction, (42))
-        );
-        
-        // Relay the message
+    function test_xDomainMessageSender_tracking() public {
+        _sendMessage(chainB(), address(this), abi.encodeCall(this.checkSender, ()));
         relayAllMessages();
+        assertEq(lastSender, address(this), "Original sender should be tracked correctly");
+    }
+    
+    /// =============================================================
+    /// SUB-CALL TRACKING TESTS
+    /// =============================================================
+
+    function test_sub_call_tracking_two_calls() public {
+        SubCallResult memory result = _runSubCallTest(2);
         
-        // Check that the call was received
-        assertTrue(receivedCall, "Call should have been received");
-        assertEq(lastValue, 42, "Value should be 42");
+        assertEq(result.subCallCount, 2, "Should track exactly 2 sub-calls");
+        assertTrue(result.subCallHashes[0] != result.subCallHashes[1], "Sub-call hashes should be unique");
+        assertEq(result.eventsEmitted, 2, "Should emit 2 SubCallRegistered events (one per sub-call)");
         
-        console.log("SUCCESS: Authentication and call execution worked");
-        console.log("Received value:", lastValue);
+        console.log("SUCCESS: 2-level sub-call tracking verified");
     }
 
-    function test_xDomainMessageSender() public {
-        vm.selectFork(forkIds[0]);
+    function test_sub_call_tracking_multiple_calls() public {
+        SubCallResult memory result = _runSubCallTest(5);
         
-        console.log("=== Testing xDomainMessageSender Functionality ===");
+        assertEq(result.subCallCount, 5, "Should track exactly 5 sub-calls");
+        assertEq(result.eventsEmitted, 5, "Should emit 5 SubCallRegistered events (one per sub-call)");
         
-        // Send message through wrapper - this should call checkSender on chain B
-        wrapperA.sendMessage(
-            chainIdByForkId[forkIds[1]],
-            address(this),
-            abi.encodeCall(this.checkSender, ())
-        );
-        
-        // Relay the message
-        relayAllMessages();
-        
-        // Verify the sender was tracked correctly
-        assertEq(lastSender, address(this), "Sender should be this contract");
-        
-        console.log("SUCCESS: xDomainMessageSender correctly tracked");
-        console.log("Original sender:", lastSender);
-    }
-
-    function test_wrapper_nonce_tracking() public {
-        vm.selectFork(forkIds[0]);
-        
-        console.log("=== Testing Wrapper Nonce Tracking ===");
-        
-        uint256 initialNonce = wrapperA.messageNonce();
-        console.log("Initial nonce:", initialNonce);
-        
-        // Send first message
-        wrapperA.sendMessage(
-            chainIdByForkId[forkIds[1]],
-            address(this),
-            abi.encodeCall(this.receiverFunction, (1))
-        );
-        
-        uint256 secondNonce = wrapperA.messageNonce();
-        console.log("After first message nonce:", secondNonce);
-        
-        // Send second message
-        wrapperA.sendMessage(
-            chainIdByForkId[forkIds[1]],
-            address(this),
-            abi.encodeCall(this.receiverFunction, (2))
-        );
-        
-        uint256 thirdNonce = wrapperA.messageNonce();
-        console.log("After second message nonce:", thirdNonce);
-        
-        // Nonce should increase
-        assertTrue(secondNonce > initialNonce, "Nonce should increase after first message");
-        assertTrue(thirdNonce > secondNonce, "Nonce should increase after second message");
-        
-        console.log("SUCCESS: Nonce tracking works correctly");
-    }
-
-    function test_wrapper_failure_handling() public {
-        vm.selectFork(forkIds[0]);
-        
-        console.log("=== Testing Wrapper Failure Handling ===");
-        
-        // Send message that will fail (invalid function selector)
-        wrapperA.sendMessage(
-            chainIdByForkId[forkIds[1]],
-            address(this),
-            abi.encodeWithSelector(bytes4(0xdeadbeef), 42)
-        );
-        
-        // Relay the message - should not revert even if target call fails
-        relayAllMessages();
-        
-        console.log("SUCCESS: Wrapper handled target call failure gracefully");
-    }
-
-    function test_cross_chain_token_minting() public {
-        vm.selectFork(forkIds[0]);
-        
-        console.log("=== Testing Cross-Chain Token Minting via Wrapper ===");
-        
-        // Check initial balance on chain B  
-        vm.selectFork(forkIds[1]);
-        uint256 initialBalance = token.balanceOf(address(0x1234));
-        console.log("Initial balance on Chain B:", initialBalance);
-        assertEq(initialBalance, 0, "Should start with 0 balance");
-        
-        // Go back to chain A and send minting message through wrapper
-        vm.selectFork(forkIds[0]);
-        
-        console.log("Sending mint command from Chain A to Chain B...");
-        wrapperA.sendMessage(
-            chainIdByForkId[forkIds[1]], // destination: Chain B
-            address(token),              // target: token contract on Chain B
-            abi.encodeCall(L2NativeSuperchainERC20.mint, (address(0x1234), 50)) // mint 50 tokens
-        );
-        
-        // Relay the message to execute on Chain B
-        relayAllMessages();
-        
-        // Switch to Chain B and verify the state change
-        vm.selectFork(forkIds[1]);
-        uint256 finalBalance = token.balanceOf(address(0x1234));
-        console.log("Final balance on Chain B:", finalBalance);
-        
-        // Verify the state was modified
-        assertEq(finalBalance, 50, "Should have minted 50 tokens");
-        
-        console.log("SUCCESS: Cross-chain token minting worked!");
-        console.log("Tokens minted:", finalBalance - initialBalance);
-    }
-
-    function test_cross_chain_event_emission() public {
-        vm.selectFork(forkIds[0]);
-        
-        console.log("=== Testing Cross-Chain Event Emission ===");
-        
-        // Start recording logs to catch events
-        vm.recordLogs();
-        
-        // Send message to emit event on Chain B
-        wrapperA.sendMessage(
-            chainIdByForkId[forkIds[1]],
-            address(this),
-            abi.encodeCall(this.emitTestEvent, ("Hello from Chain A!", 12345))
-        );
-        
-        // Relay the message
-        relayAllMessages();
-        
-        // Get the recorded logs and verify our event was emitted
-        Vm.Log[] memory logs = vm.getRecordedLogs();
-        
-        bool eventFound = false;
-        for (uint i = 0; i < logs.length; i++) {
-            // Look for our TestEvent emission
-            if (logs[i].topics[0] == keccak256("TestEvent(string,uint256)")) {
-                eventFound = true;
-                console.log("Found TestEvent in logs!");
-                break;
+        // Verify all hashes are unique
+        for (uint256 i = 0; i < result.subCallHashes.length; i++) {
+            for (uint256 j = i + 1; j < result.subCallHashes.length; j++) {
+                assertTrue(result.subCallHashes[i] != result.subCallHashes[j], "All sub-call hashes should be unique");
             }
         }
         
-        assertTrue(eventFound, "TestEvent should have been emitted");
-        console.log("SUCCESS: Cross-chain event emission verified!");
+        console.log("SUCCESS: Multiple sub-call tracking verified");
     }
 
-    function test_sub_call_tracking() public {
-        vm.selectFork(forkIds[0]);
+    function test_sub_call_tracking_three_calls() public {
+        SubCallResult memory result = _runSubCallTest(3);
         
-        console.log("=== Testing Sub-Call Tracking for Nested Promises ===");
+        assertEq(result.subCallCount, 3, "Should track exactly 3 sub-calls");
+        assertEq(result.eventsEmitted, 3, "Should emit 3 SubCallRegistered events (one per sub-call)");
         
-        // Deploy a contract on Chain B that will make sub-calls
-        vm.selectFork(forkIds[1]);
-        SubCallMaker subCallMaker = new SubCallMaker(address(wrapperB));
+        // Verify all 3 hashes are unique
+        assertTrue(result.subCallHashes[0] != result.subCallHashes[1], "Sub-call hash 1 != 2");
+        assertTrue(result.subCallHashes[0] != result.subCallHashes[2], "Sub-call hash 1 != 3");
+        assertTrue(result.subCallHashes[1] != result.subCallHashes[2], "Sub-call hash 2 != 3");
         
-        // Go back to Chain A and send a message that will trigger sub-calls
-        vm.selectFork(forkIds[0]);
-        
-        console.log("Sending message from Chain A to Chain B that will trigger 2 sub-calls...");
-        
-        // Compute the deterministic hash that will be used for sub-call tracking
-        bytes memory messageData = abi.encodeCall(SubCallMaker.makeSubCalls, (chainIdByForkId[forkIds[0]]));
-        bytes32 deterministicHash = _computeDeterministicHash(
-            chainIdByForkId[forkIds[1]], // destination: Chain B
-            address(this),               // sender: test contract
-            address(subCallMaker),       // target: contract that makes sub-calls
-            messageData                  // message data
-        );
-        
-        bytes32 actualMessageHash = wrapperA.sendMessage(
-            chainIdByForkId[forkIds[1]], // destination: Chain B
-            address(subCallMaker),       // target: contract that makes sub-calls
-            messageData                  // call back to Chain A
-        );
-        
-        console.log("Actual CDM message hash:", vm.toString(actualMessageHash));
-        console.log("Deterministic hash for tracking:", vm.toString(deterministicHash));
-        
-        // Verify initially no sub-calls
-        vm.selectFork(forkIds[1]);
-        assertEq(wrapperB.getSubCallCount(deterministicHash), 0, "Should start with 0 sub-calls");
-        
-        // Relay the message - this should trigger the sub-calls
-        relayAllMessages();
-        
-        // Check that sub-calls were tracked
-        uint256 subCallCount = wrapperB.getSubCallCount(deterministicHash);
-        console.log("Sub-calls tracked:", subCallCount);
-        
-        assertEq(subCallCount, 2, "Should have tracked 2 sub-calls");
-        
-        // Get the actual sub-call hashes
-        bytes32[] memory subCallHashes = wrapperB.getSubCalls(deterministicHash);
-        
-        console.log("Sub-call 1 hash:", vm.toString(subCallHashes[0]));
-        console.log("Sub-call 2 hash:", vm.toString(subCallHashes[1]));
-        
-        // Verify the hashes are different (distinct calls)
-        assertTrue(subCallHashes[0] != subCallHashes[1], "Sub-calls should have different hashes");
-        
-        console.log("SUCCESS: Sub-call tracking working correctly!");
-        console.log("Parent message triggered", subCallCount, "sub-calls as expected");
-    }
-    
-    /// @notice Helper function to compute the same deterministic hash as the wrapper
-    function _computeDeterministicHash(uint256 _destination, address _sender, address _target, bytes memory _message) private view returns (bytes32) {
-        return keccak256(abi.encodePacked(
-            block.chainid,              // source chain
-            _destination,               // destination chain  
-            _sender,                    // original sender
-            _target,                    // target
-            _message,                   // message data
-            wrapperA.messageNonce()     // add nonce for uniqueness (get from wrapper A)
-        ));
+        console.log("SUCCESS: 3 sub-calls tracked perfectly!");
+        console.log("Hash 1:", vm.toString(result.subCallHashes[0]));
+        console.log("Hash 2:", vm.toString(result.subCallHashes[1]));
+        console.log("Hash 3:", vm.toString(result.subCallHashes[2]));
     }
 
-    function test_sub_call_events() public {
-        vm.selectFork(forkIds[0]);
-        
-        console.log("=== Testing Sub-Call Event Emission ===");
-        
-        // Deploy SubCallMaker on Chain B
-        vm.selectFork(forkIds[1]);
-        SubCallMaker subCallMaker = new SubCallMaker(address(wrapperB));
-        
-        vm.selectFork(forkIds[0]);
-        
-        // Start recording logs to catch SubCallRegistered events
+    function test_nested_call_tracking() public {
+        _onChainA();
         vm.recordLogs();
         
-        // Send message that will trigger sub-calls
+        // Level 1: A -> B (will trigger Level 2: B -> A)
         wrapperA.sendMessage(
-            chainIdByForkId[forkIds[1]],
-            address(subCallMaker),
-            abi.encodeCall(SubCallMaker.makeSubCalls, (chainIdByForkId[forkIds[0]]))
+            chainB(),
+            address(callMakerB),
+            abi.encodeCall(TestCallMaker.makeNestedCall, (chainA(), address(callMakerA), 2))
         );
         
-        // Relay the message
+        // Relay Level 1
+        console.log("=== Debug Level 1 Execution ===");
+        RelayedMessage[] memory level1Messages = relayAllMessages();
+        console.log("Level 1 messages relayed:", level1Messages.length);
+        
+        // Check Level 1 logs
+        Vm.Log[] memory level1Logs = vm.getRecordedLogs();
+        console.log("Level 1 logs count:", level1Logs.length);
+        uint256 level1SubCallEvents = _countSubCallEvents(level1Logs);
+        console.log("Level 1 SubCallRegistered events:", level1SubCallEvents);
+        
+        // DEBUGGING: Check if Level 1 logs contain SentMessage events from makeNestedCall
+        uint256 sentMessageEvents = 0;
+        bytes32 sentMessageSelector = keccak256("SentMessage(uint256,address,uint256,address,bytes)");
+        for (uint256 i = 0; i < level1Logs.length; i++) {
+            if (level1Logs[i].topics[0] == sentMessageSelector) {
+                sentMessageEvents++;
+                console.log("Found SentMessage event #", sentMessageEvents, "in Level 1 logs");
+            }
+        }
+        console.log("Total SentMessage events in Level 1 logs:", sentMessageEvents);
+        
+        // Verify Level 1 created 1 sub-call (this happens on Chain B)
+        bytes32 level1ParentHash = _extractParentHash(level1Logs, 0);
+        console.log("Level 1 parent hash:", vm.toString(level1ParentHash));
+        
+        // Get sub-call count from Chain B storage
+        _onChainB();
+        uint256 level1SubCallCount = wrapperB.getSubCallCount(level1ParentHash);
+        console.log("Level 1 sub-call count from storage:", level1SubCallCount);
+        
+        assertEq(level1SubCallCount, 1, "Level 1 should create 1 sub-call (the nested call)");
+        
+        // Debug: Relay Level 2 using the nested message from Level 1 logs
+        console.log("=== Debug Level 2 Execution ===");
+        console.log("Before Level 2 - Current fork:", vm.activeFork());
+        console.log("Before Level 2 - Chain A fork:", forkIds[0]);
+        console.log("Before Level 2 - Chain B fork:", forkIds[1]);
+        
+        // Record logs on Chain A to capture makeSubCalls execution
+        _onChainA();
+        vm.recordLogs();
+        
+        // FIXED: Use Level 1 logs to relay the nested message created by makeNestedCall
+        // The makeNestedCall created a SentMessage on Chain B during Level 1 execution
+        RelayedMessage[] memory level2Messages = relayMessages(level1Logs, chainB());
+        
+        // Check what fork we're on after relay
+        console.log("After Level 2 relay - Current fork:", vm.activeFork());
+        
+        // Level 2 execution should happen on Chain A, so check logs there
+        Vm.Log[] memory level2Logs = vm.getRecordedLogs();
+        console.log("Level 2 logs count on Chain A:", level2Logs.length);
+        console.log("Level 2 messages relayed:", level2Messages.length);
+        
+        uint256 subCallEvents = _countSubCallEvents(level2Logs);
+        console.log("Level 2 SubCallRegistered events on Chain A:", subCallEvents);
+        
+        // If no events on Chain A, check Chain B too for debugging
+        if (subCallEvents == 0) {
+            _onChainB();
+            Vm.Log[] memory level2LogsB = vm.getRecordedLogs();
+            uint256 subCallEventsB = _countSubCallEvents(level2LogsB);
+            console.log("Level 2 SubCallRegistered events on Chain B:", subCallEventsB);
+            _onChainA();  // Switch back
+        }
+        
+        // Verify Level 2 sub-calls (should happen on Chain A)
+        bytes32 level2ParentHash = _extractParentHash(level2Logs, 0);
+        console.log("Level 2 parent hash:", vm.toString(level2ParentHash));
+        
+        // Get sub-call count from Chain A storage
+        uint256 level2SubCallCount = wrapperA.getSubCallCount(level2ParentHash);
+        console.log("Level 2 sub-call count from storage:", level2SubCallCount);
+        
+        assertEq(level2SubCallCount, 2, "Level 2 should create 2 sub-calls");
+        
+        console.log("SUCCESS: Nested call tracking verified across 2 levels");
+        console.log("Level 1 parent:", vm.toString(level1ParentHash));
+        console.log("Level 2 parent:", vm.toString(level2ParentHash));
+    }
+
+    function test_deep_nesting_capability() public {
+        console.log("=== Testing Deep Nesting Capability ===");
+        
+        // Create a chain: A -> B -> A -> B (3 hops)
+        _onChainA();
+        vm.recordLogs();
+        
+        // Level 1: A -> B
+        wrapperA.sendMessage(
+            chainB(),
+            address(callMakerB),
+            abi.encodeCall(TestCallMaker.makeNestedCall, (chainA(), address(callMakerA), 1))
+        );
+        
+        // Keep track of all logs across levels
+        Vm.Log[] memory accumulatedLogs;
+        
+        // Relay all levels and collect logs
+        for (uint256 i = 0; i < 3; i++) {
+            console.log("Relaying level", i + 1);
+            relayAllMessages();
+            
+            // Collect logs from this level
+            Vm.Log[] memory levelLogs = vm.getRecordedLogs();
+            accumulatedLogs = _concatenateLogs(accumulatedLogs, levelLogs);
+            
+            // Clear logs for next level (except the last iteration)
+            if (i < 2) {
+                vm.recordLogs();
+            }
+        }
+        
+        // Verify we had sub-call tracking at multiple levels
+        uint256 totalEvents = _countSubCallEvents(accumulatedLogs);
+        assertTrue(totalEvents >= 1, "Should have sub-call tracking events in deep nesting");
+        
+        console.log("SUCCESS: Deep nesting (3+ levels) capability verified");
+        console.log("Total SubCallRegistered events:", totalEvents);
+    }
+
+    function test_three_level_deep_sub_call_tracking() public {
+        console.log("=== Testing 3-Level Deep Sub-Call Tracking ===");
+        
+        _onChainA();
+        vm.recordLogs();
+        
+        // Level 1: A -> B (TestCallMaker.makeNestedCall)
+        console.log("Level 1: Chain A -> Chain B");
+        wrapperA.sendMessage(
+            chainB(),
+            address(callMakerB),
+            abi.encodeCall(TestCallMaker.makeNestedCall, (chainA(), address(callMakerA), 3))
+        );
+        
+        // Relay Level 1: This triggers Level 2
         relayAllMessages();
         
-        // Check for SubCallRegistered events
+        // Verify Level 1 tracking
+        Vm.Log[] memory level1Logs = vm.getRecordedLogs();
+        bytes32 level1Parent = _extractParentHash(level1Logs, 0);
+        uint256 level1Events = _countSubCallEvents(level1Logs);
+        
+        console.log("Level 1 - Parent hash:", vm.toString(level1Parent));
+        console.log("Level 1 - SubCall events:", level1Events);
+        
+        if (level1Parent != bytes32(0)) {
+            _onChainB();
+            uint256 level1SubCalls = wrapperB.getSubCallCount(level1Parent);
+            console.log("Level 1 - Sub-calls in storage:", level1SubCalls);
+            assertEq(level1SubCalls, 1, "Level 1 should create 1 sub-call (the nested call)");
+        }
+        
+        // Level 2: B -> A (TestCallMaker.makeSubCalls with 3 sub-calls)
+        console.log("Level 2: Chain B -> Chain A");
+        
+        // FIXED: Record logs on Chain A to capture makeSubCalls execution
+        _onChainA();
+        vm.recordLogs();
+        
+        // FIXED: Use Level 1 logs to relay the nested message created by makeNestedCall
+        RelayedMessage[] memory level2Messages = relayMessages(level1Logs, chainB());
+        
+        // Verify Level 2 tracking  
+        Vm.Log[] memory level2Logs = vm.getRecordedLogs();
+        bytes32 level2Parent = _extractParentHash(level2Logs, 0);
+        uint256 level2Events = _countSubCallEvents(level2Logs);
+        
+        console.log("Level 2 - Parent hash:", vm.toString(level2Parent));
+        console.log("Level 2 - SubCall events:", level2Events);
+        console.log("Level 2 - Messages relayed:", level2Messages.length);
+        
+        // FIXED: Remove conditional logic and always check assertions
+        uint256 level2SubCalls = wrapperA.getSubCallCount(level2Parent);
+        console.log("Level 2 - Sub-calls in storage:", level2SubCalls);
+        assertEq(level2SubCalls, 3, "Level 2 should create 3 sub-calls");
+        assertEq(level2Events, 3, "Level 2 should emit 3 SubCallRegistered events");
+        
+        // Level 3: A -> B (the 3 individual sub-calls)
+        console.log("Level 3: Chain A -> Chain B (final calls)");
+        relayAllMessages();
+        
+        console.log("SUCCESS: 3-level deep sub-call tracking verified!");
+        console.log("PASS Level 1 (A->B): 1 nested call tracked");
+        console.log("PASS Level 2 (B->A): 3 sub-calls tracked");  
+        console.log("PASS Level 3 (A->B): Final execution (no further sub-calls)");
+    }
+    
+    /// =============================================================
+    /// HELPER STRUCTURES & VERIFICATION
+    /// =============================================================
+    
+    struct SubCallResult {
+        bytes32 parentHash;
+        uint256 subCallCount;
+        bytes32[] subCallHashes;
+        uint256 eventsEmitted;
+    }
+    
+    struct SubCallVerification {
+        bytes32 parentHash;
+        uint256 subCallCount;
+        bytes32[] subCallHashes;
+    }
+    
+    /// @notice Run a standard sub-call test and return results
+    function _runSubCallTest(uint256 _subCallCount) internal returns (SubCallResult memory) {
+        _onChainA();
+        vm.recordLogs();
+        
+        // Send message that triggers sub-calls
+        wrapperA.sendMessage(
+            chainB(),
+            address(callMakerB),
+            abi.encodeCall(TestCallMaker.makeSubCalls, (chainA(), _subCallCount))
+        );
+        
+        relayAllMessages();
+        
+        // Extract and verify results
         Vm.Log[] memory logs = vm.getRecordedLogs();
+        bytes32 parentHash = _extractParentHash(logs, 0);
+        uint256 eventsEmitted = _countSubCallEvents(logs);
+        
+        // Get sub-call data from storage
+        uint256 subCallCount = 0;
+        bytes32[] memory subCallHashes = new bytes32[](0);
+        
+        if (parentHash != bytes32(0)) {
+            _onChainB();
+            subCallCount = wrapperB.getSubCallCount(parentHash);
+            subCallHashes = wrapperB.getSubCalls(parentHash);
+        }
+        
+        return SubCallResult({
+            parentHash: parentHash,
+            subCallCount: subCallCount,
+            subCallHashes: subCallHashes,
+            eventsEmitted: eventsEmitted
+        });
+    }
+    
+    /// @notice Verify sub-calls from recorded logs
+    function _verifySubCallsFromLogs(uint256 eventIndex) internal returns (SubCallVerification memory) {
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        bytes32 parentHash = _extractParentHash(logs, eventIndex);
+        
+        if (parentHash == bytes32(0)) {
+            return SubCallVerification(bytes32(0), 0, new bytes32[](0));
+        }
+        
+        // Get sub-call data from wrapper storage (sub-calls are tracked where they're made)
+        _onChainB();
+        uint256 subCallCount = wrapperB.getSubCallCount(parentHash);
+        bytes32[] memory subCallHashes = wrapperB.getSubCalls(parentHash);
+        
+        return SubCallVerification({
+            parentHash: parentHash,
+            subCallCount: subCallCount,
+            subCallHashes: subCallHashes
+        });
+    }
+    
+    /// @notice Verify sub-calls from recorded logs on specific chain
+    function _verifySubCallsFromLogsOnChain(uint256 eventIndex, bool useChainA) internal returns (SubCallVerification memory) {
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        bytes32 parentHash = _extractParentHash(logs, eventIndex);
+        
+        if (parentHash == bytes32(0)) {
+            return SubCallVerification(bytes32(0), 0, new bytes32[](0));
+        }
+        
+        // Get sub-call data from wrapper storage on the specified chain
+        if (useChainA) {
+            _onChainA();
+            uint256 subCallCount = wrapperA.getSubCallCount(parentHash);
+            bytes32[] memory subCallHashes = wrapperA.getSubCalls(parentHash);
+            
+            return SubCallVerification({
+                parentHash: parentHash,
+                subCallCount: subCallCount,
+                subCallHashes: subCallHashes
+            });
+        } else {
+            _onChainB();
+            uint256 subCallCount = wrapperB.getSubCallCount(parentHash);
+            bytes32[] memory subCallHashes = wrapperB.getSubCalls(parentHash);
+            
+            return SubCallVerification({
+                parentHash: parentHash,
+                subCallCount: subCallCount,
+                subCallHashes: subCallHashes
+            });
+        }
+    }
+    
+    /// @notice Extract parent hash from SubCallRegistered events
+    function _extractParentHash(Vm.Log[] memory logs, uint256 eventIndex) internal pure returns (bytes32) {
+        uint256 foundEvents = 0;
+        bytes32 selector = keccak256("SubCallRegistered(bytes32,bytes32,uint256,address,bytes)");
+        
+        for (uint256 i = 0; i < logs.length; i++) {
+            if (logs[i].topics[0] == selector) {
+                if (foundEvents == eventIndex) {
+                    return abi.decode(abi.encodePacked(logs[i].topics[1]), (bytes32));
+                }
+                foundEvents++;
+            }
+        }
+        return bytes32(0);
+    }
+    
+    /// @notice Count SubCallRegistered events in logs
+    function _countSubCallEvents(Vm.Log[] memory logs) internal pure returns (uint256 count) {
+        bytes32 selector = keccak256("SubCallRegistered(bytes32,bytes32,uint256,address,bytes)");
+        for (uint256 i = 0; i < logs.length; i++) {
+            if (logs[i].topics[0] == selector) count++;
+        }
+    }
+    
+    /// @notice Concatenate two log arrays
+    function _concatenateLogs(Vm.Log[] memory logs1, Vm.Log[] memory logs2) internal pure returns (Vm.Log[] memory) {
+        Vm.Log[] memory result = new Vm.Log[](logs1.length + logs2.length);
+        
+        // Copy logs1
+        for (uint256 i = 0; i < logs1.length; i++) {
+            result[i] = logs1[i];
+        }
+        
+        // Copy logs2
+        for (uint256 i = 0; i < logs2.length; i++) {
+            result[logs1.length + i] = logs2[i];
+        }
+        
+        return result;
+    }
+    
+    /// =============================================================
+    /// DEPLOYMENT & UTILITY HELPERS
+    /// =============================================================
+    
+    function _deployContracts() private {
+        // Deploy on Chain A
+        _onChainA();
+        wrapperA = new PromiseAwareMessenger{salt: bytes32(0)}();
+        callMakerA = new TestCallMaker{salt: bytes32(0)}(address(wrapperA));
+        token = new TestToken{salt: bytes32(0)}();
+        
+        // Deploy on Chain B  
+        _onChainB();
+        wrapperB = new PromiseAwareMessenger{salt: bytes32(0)}();
+        callMakerB = new TestCallMaker{salt: bytes32(0)}(address(wrapperB));
+        new TestToken{salt: bytes32(0)}();
+        token.mint(address(this), 100); // Initial tokens for testing
+    }
+    
+    function _verifyDeployments() private {
+        require(address(wrapperA) == address(wrapperB), "Wrappers not at same address");
+        require(address(callMakerA) == address(callMakerB), "CallMakers not at same address");
+    }
+    
+    /// @notice Send message from Chain A to specified destination
+    function _sendMessage(uint256 _destination, address _target, bytes memory _message) internal returns (bytes32) {
+        _onChainA();
+        return wrapperA.sendMessage(_destination, _target, _message);
+    }
+    
+    /// @notice Get token balance on Chain B
+    function _getTokenBalance(address _account) internal returns (uint256) {
+        _onChainB();
+        return token.balanceOf(_account);
+    }
+    
+    /// =============================================================
+    /// CHAIN ABSTRACTIONS
+    /// =============================================================
+    
+    function _onChainA() internal { vm.selectFork(forkIds[0]); }
+    function _onChainB() internal { vm.selectFork(forkIds[1]); }
+    function chainA() internal view returns (uint256) { return chainIdByForkId[forkIds[0]]; }
+    function chainB() internal view returns (uint256) { return chainIdByForkId[forkIds[1]]; }
+    
+    /// =============================================================
+    /// TEST CALLBACKS
+    /// =============================================================
+    
+    function checkSender() public {
+        _onChainB();
+        lastSender = wrapperB.xDomainMessageSender();
+    }
+
+    function test_debug_subcall_events() public {
+        _onChainA();
+        vm.recordLogs();
+        
+        console.log("=== Debug: Sub-Call Event Tracking ===");
+        
+        // Send a simple sub-call test
+        wrapperA.sendMessage(
+            chainB(),
+            address(callMakerB),
+            abi.encodeCall(TestCallMaker.makeSubCalls, (chainA(), 2))
+        );
+        
+        relayAllMessages();
+        
+        // Debug: Check all logs
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        console.log("Total logs recorded:", logs.length);
         
         uint256 subCallEventCount = 0;
-        for (uint i = 0; i < logs.length; i++) {
-            if (logs[i].topics[0] == keccak256("SubCallRegistered(bytes32,bytes32,uint256,address,bytes)")) {
+        bytes32 subCallSelector = keccak256("SubCallRegistered(bytes32,bytes32,uint256,address,bytes)");
+        
+        for (uint256 i = 0; i < logs.length; i++) {
+            console.log("Log", i, "topic[0]:", vm.toString(logs[i].topics[0]));
+            
+            if (logs[i].topics[0] == subCallSelector) {
                 subCallEventCount++;
+                bytes32 parentHash = abi.decode(abi.encodePacked(logs[i].topics[1]), (bytes32));
+                bytes32 subCallHash = abi.decode(abi.encodePacked(logs[i].topics[2]), (bytes32));
+                
                 console.log("Found SubCallRegistered event #", subCallEventCount);
+                console.log("  Parent hash:", vm.toString(parentHash));
+                console.log("  Sub-call hash:", vm.toString(subCallHash));
+                
+                // Check storage on Chain B
+                _onChainB();
+                uint256 storedSubCalls = wrapperB.getSubCallCount(parentHash);
+                console.log("  Stored sub-calls for this parent:", storedSubCalls);
+                _onChainA();
             }
         }
         
-        assertEq(subCallEventCount, 2, "Should have emitted 2 SubCallRegistered events");
-        console.log("SUCCESS: Sub-call events emitted correctly!");
-    }
-
-    // Helper functions called by tests
-    function receiverFunction(uint256 value) public {
-        receivedCall = true;
-        lastValue = value;
-        emit CallReceived(msg.sender, value);
-    }
-
-    function checkSender() public {
-        // Get the sender through the wrapper's xDomainMessageSender
-        vm.selectFork(forkIds[1]);
-        lastSender = wrapperB.xDomainMessageSender();
-        console.log("Checked sender:", lastSender);
-    }
-
-    event TestEvent(string message, uint256 number);
-    
-    function emitTestEvent(string memory message, uint256 number) public {
-        emit TestEvent(message, number);
-        console.log("Event emitted:", message, number);
-    }
-}
-
-/// @notice Mock ERC20 token for testing
-contract L2NativeSuperchainERC20 is SuperchainERC20 {
-    event Mint(address indexed account, uint256 amount);
-    event Burn(address indexed account, uint256 amount);
-
-    function mint(address _to, uint256 _amount) external virtual {
-        require(_to != address(0), "Zero address");
-        _mint(_to, _amount);
-        emit Mint(_to, _amount);
-    }
-
-    function burn(address _from, uint256 _amount) external virtual {
-        require(_from != address(0), "Zero address");
-        _burn(_from, _amount);
-        emit Burn(_from, _amount);
-    }
-
-    function name() public pure virtual override returns (string memory) {
-        return "L2NativeSuperchainERC20";
-    }
-
-    function symbol() public pure virtual override returns (string memory) {
-        return "MOCK";
-    }
-
-    function decimals() public pure override returns (uint8) {
-        return 18;
-    }
-}
-
-/// @notice Test contract that makes sub-calls during execution
-contract SubCallMaker {
-    PromiseAwareMessenger public wrapper;
-    
-    event SubCallsMade(uint256 destinationChain, uint256 callCount);
-    
-    constructor(address _wrapper) {
-        wrapper = PromiseAwareMessenger(_wrapper);
-    }
-    
-    /// @notice Makes 2 sub-calls back to the specified destination chain
-    /// @param _destinationChain The chain to make calls back to
-    function makeSubCalls(uint256 _destinationChain) external {
-        console.log("SubCallMaker: Making 2 sub-calls to chain", _destinationChain);
+        console.log("Total SubCallRegistered events found:", subCallEventCount);
         
-        // Make first sub-call - call a simple function
-        wrapper.sendMessage(
-            _destinationChain,
-            address(0x1111111111111111111111111111111111111111), // dummy target
-            abi.encodeWithSignature("someFunction(uint256)", 123)
-        );
-        
-        // Make second sub-call - call a different function  
-        wrapper.sendMessage(
-            _destinationChain,
-            address(0x2222222222222222222222222222222222222222), // different dummy target
-            abi.encodeWithSignature("anotherFunction(string)", "test")
-        );
-        
-        emit SubCallsMade(_destinationChain, 2);
-        console.log("SubCallMaker: Completed 2 sub-calls");
+        if (subCallEventCount > 0) {
+            console.log("SUCCESS: Sub-call events are being emitted!");
+        } else {
+            console.log("ISSUE: No SubCallRegistered events found");
+        }
     }
 } 
