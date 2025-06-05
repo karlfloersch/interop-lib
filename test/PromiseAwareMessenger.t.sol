@@ -238,6 +238,115 @@ contract PromiseAwareMessengerTest is Relayer, Test {
         console.log("SUCCESS: Cross-chain event emission verified!");
     }
 
+    function test_sub_call_tracking() public {
+        vm.selectFork(forkIds[0]);
+        
+        console.log("=== Testing Sub-Call Tracking for Nested Promises ===");
+        
+        // Deploy a contract on Chain B that will make sub-calls
+        vm.selectFork(forkIds[1]);
+        SubCallMaker subCallMaker = new SubCallMaker(address(wrapperB));
+        
+        // Go back to Chain A and send a message that will trigger sub-calls
+        vm.selectFork(forkIds[0]);
+        
+        console.log("Sending message from Chain A to Chain B that will trigger 2 sub-calls...");
+        
+        // Compute the deterministic hash that will be used for sub-call tracking
+        bytes memory messageData = abi.encodeCall(SubCallMaker.makeSubCalls, (chainIdByForkId[forkIds[0]]));
+        bytes32 deterministicHash = _computeDeterministicHash(
+            chainIdByForkId[forkIds[1]], // destination: Chain B
+            address(this),               // sender: test contract
+            address(subCallMaker),       // target: contract that makes sub-calls
+            messageData                  // message data
+        );
+        
+        bytes32 actualMessageHash = wrapperA.sendMessage(
+            chainIdByForkId[forkIds[1]], // destination: Chain B
+            address(subCallMaker),       // target: contract that makes sub-calls
+            messageData                  // call back to Chain A
+        );
+        
+        console.log("Actual CDM message hash:", vm.toString(actualMessageHash));
+        console.log("Deterministic hash for tracking:", vm.toString(deterministicHash));
+        
+        // Verify initially no sub-calls
+        vm.selectFork(forkIds[1]);
+        assertEq(wrapperB.getSubCallCount(deterministicHash), 0, "Should start with 0 sub-calls");
+        
+        // Relay the message - this should trigger the sub-calls
+        relayAllMessages();
+        
+        // Check that sub-calls were tracked
+        uint256 subCallCount = wrapperB.getSubCallCount(deterministicHash);
+        console.log("Sub-calls tracked:", subCallCount);
+        
+        assertEq(subCallCount, 2, "Should have tracked 2 sub-calls");
+        
+        // Get the actual sub-call hashes
+        bytes32[] memory subCallHashes = wrapperB.getSubCalls(deterministicHash);
+        
+        console.log("Sub-call 1 hash:", vm.toString(subCallHashes[0]));
+        console.log("Sub-call 2 hash:", vm.toString(subCallHashes[1]));
+        
+        // Verify the hashes are different (distinct calls)
+        assertTrue(subCallHashes[0] != subCallHashes[1], "Sub-calls should have different hashes");
+        
+        console.log("SUCCESS: Sub-call tracking working correctly!");
+        console.log("Parent message triggered", subCallCount, "sub-calls as expected");
+    }
+    
+    /// @notice Helper function to compute the same deterministic hash as the wrapper
+    function _computeDeterministicHash(uint256 _destination, address _sender, address _target, bytes memory _message) private view returns (bytes32) {
+        return keccak256(abi.encodePacked(
+            block.chainid,              // source chain
+            _destination,               // destination chain  
+            _sender,                    // original sender
+            _target,                    // target
+            _message,                   // message data
+            wrapperA.messageNonce()     // add nonce for uniqueness (get from wrapper A)
+        ));
+    }
+
+    function test_sub_call_events() public {
+        vm.selectFork(forkIds[0]);
+        
+        console.log("=== Testing Sub-Call Event Emission ===");
+        
+        // Deploy SubCallMaker on Chain B
+        vm.selectFork(forkIds[1]);
+        SubCallMaker subCallMaker = new SubCallMaker(address(wrapperB));
+        
+        vm.selectFork(forkIds[0]);
+        
+        // Start recording logs to catch SubCallRegistered events
+        vm.recordLogs();
+        
+        // Send message that will trigger sub-calls
+        wrapperA.sendMessage(
+            chainIdByForkId[forkIds[1]],
+            address(subCallMaker),
+            abi.encodeCall(SubCallMaker.makeSubCalls, (chainIdByForkId[forkIds[0]]))
+        );
+        
+        // Relay the message
+        relayAllMessages();
+        
+        // Check for SubCallRegistered events
+        Vm.Log[] memory logs = vm.getRecordedLogs();
+        
+        uint256 subCallEventCount = 0;
+        for (uint i = 0; i < logs.length; i++) {
+            if (logs[i].topics[0] == keccak256("SubCallRegistered(bytes32,bytes32,uint256,address,bytes)")) {
+                subCallEventCount++;
+                console.log("Found SubCallRegistered event #", subCallEventCount);
+            }
+        }
+        
+        assertEq(subCallEventCount, 2, "Should have emitted 2 SubCallRegistered events");
+        console.log("SUCCESS: Sub-call events emitted correctly!");
+    }
+
     // Helper functions called by tests
     function receiverFunction(uint256 value) public {
         receivedCall = true;
@@ -287,5 +396,39 @@ contract L2NativeSuperchainERC20 is SuperchainERC20 {
 
     function decimals() public pure override returns (uint8) {
         return 18;
+    }
+}
+
+/// @notice Test contract that makes sub-calls during execution
+contract SubCallMaker {
+    PromiseAwareMessenger public wrapper;
+    
+    event SubCallsMade(uint256 destinationChain, uint256 callCount);
+    
+    constructor(address _wrapper) {
+        wrapper = PromiseAwareMessenger(_wrapper);
+    }
+    
+    /// @notice Makes 2 sub-calls back to the specified destination chain
+    /// @param _destinationChain The chain to make calls back to
+    function makeSubCalls(uint256 _destinationChain) external {
+        console.log("SubCallMaker: Making 2 sub-calls to chain", _destinationChain);
+        
+        // Make first sub-call - call a simple function
+        wrapper.sendMessage(
+            _destinationChain,
+            address(0x1111111111111111111111111111111111111111), // dummy target
+            abi.encodeWithSignature("someFunction(uint256)", 123)
+        );
+        
+        // Make second sub-call - call a different function  
+        wrapper.sendMessage(
+            _destinationChain,
+            address(0x2222222222222222222222222222222222222222), // different dummy target
+            abi.encodeWithSignature("anotherFunction(string)", "test")
+        );
+        
+        emit SubCallsMade(_destinationChain, 2);
+        console.log("SubCallMaker: Completed 2 sub-calls");
     }
 } 
