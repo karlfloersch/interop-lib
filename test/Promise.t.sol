@@ -219,7 +219,7 @@ contract PromiseTest is Relayer, Test {
         // Deploy wrapper on both chains
         PromiseAwareMessenger wrapper = new PromiseAwareMessenger();
         vm.selectFork(forkIds[1]);
-        PromiseAwareMessenger wrapperB = new PromiseAwareMessenger();
+        new PromiseAwareMessenger();
         vm.selectFork(forkIds[0]);
         
         console.log("=== Testing PromiseAwareMessenger Basic Wrapper ===");

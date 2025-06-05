@@ -1,57 +1,91 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.25;
+pragma solidity ^0.8.25;
 
 import {IL2ToL2CrossDomainMessenger} from "./interfaces/IL2ToL2CrossDomainMessenger.sol";
 import {Identifier} from "./interfaces/IIdentifier.sol";
 import {PredeployAddresses} from "./libraries/PredeployAddresses.sol";
 
-/// @notice A wrapper around IL2ToL2CrossDomainMessenger that can add custom logic
-/// @dev This wrapper delegates all calls to the underlying CDM but allows for extensions
+/// @notice A wrapper around IL2ToL2CrossDomainMessenger that adds proper authentication and sender tracking
+/// @dev This wrapper uses the CDM to call itself on the destination chain, then makes the actual call
 contract PromiseAwareMessenger {
     /// @notice The underlying cross domain messenger
     IL2ToL2CrossDomainMessenger public immutable messenger;
     
-    /// @notice Event emitted when a message is sent through the wrapper
-    event WrapperMessageSent(uint256 destination, address target, bytes message, bytes32 messageHash);
+    /// @notice Default value for when no cross-domain message is being executed
+    address private constant DEFAULT_SENDER = address(0x000000000000000000000000000000000000dEaD);
     
-    /// @notice Event emitted when a message is relayed through the wrapper  
-    event WrapperMessageRelayed(Identifier id, bytes message);
+    /// @notice Address of the sender of the currently executing cross-domain message
+    /// @dev This is set during relayWrappedMessage execution to track the original sender
+    address private xDomainMsgSender;
+    
+    /// @notice Event emitted when a message is sent through the wrapper
+    event WrapperMessageSent(uint256 destination, address target, bytes message, address sender);
+    
+    /// @notice Event emitted when a wrapped message is relayed
+    event WrapperMessageRelayed(address target, address sender, bytes message, bool success);
     
     constructor() {
         messenger = IL2ToL2CrossDomainMessenger(PredeployAddresses.L2_TO_L2_CROSS_DOMAIN_MESSENGER);
+        xDomainMsgSender = DEFAULT_SENDER;
     }
     
-    /// @notice Send a message via the wrapper (delegates to underlying CDM)
+    /// @notice Send a message via the wrapper - calls itself on destination chain instead of target directly
     /// @param _destination The destination chain ID
     /// @param _target The target contract address
     /// @param _message The message to send
     /// @return messageHash The hash of the sent message
     function sendMessage(uint256 _destination, address _target, bytes calldata _message) external returns (bytes32) {
-        // Custom logic can go here (before)
+        // Use CDM to call ourselves on the destination chain with relayWrappedMessage
+        bytes memory wrappedMessage = abi.encodeWithSelector(
+            this.relayWrappedMessage.selector,
+            msg.sender,  // original sender
+            _target,     // final target
+            _message     // original message
+        );
         
-        // Delegate to underlying CDM
-        bytes32 messageHash = messenger.sendMessage(_destination, _target, _message);
+        bytes32 messageHash = messenger.sendMessage(_destination, address(this), wrappedMessage);
         
-        // Custom logic can go here (after)
-        emit WrapperMessageSent(_destination, _target, _message, messageHash);
+        emit WrapperMessageSent(_destination, _target, _message, msg.sender);
         
         return messageHash;
     }
     
-    /// @notice Relay a message via the wrapper (delegates to underlying CDM)
-    /// @param _id The message identifier
-    /// @param _sentMessage The sent message
-    /// @return The return data from the relayed message
-    function relayMessage(Identifier calldata _id, bytes calldata _sentMessage) external payable returns (bytes memory) {
-        // Custom logic can go here (before)
-        emit WrapperMessageRelayed(_id, _sentMessage);
+    /// @notice Relay a wrapped message - called by CDM from another wrapper instance
+    /// @param _originalSender The original sender from the source chain
+    /// @param _target The target contract address
+    /// @param _message The message to send to the target
+    function relayWrappedMessage(address _originalSender, address _target, bytes calldata _message) external {
+        // Authenticate that this is being called by the CDM
+        require(msg.sender == address(messenger), "PromiseAwareMessenger: not called by CDM");
         
-        // Delegate to underlying CDM  
-        bytes memory returnData = messenger.relayMessage(_id, _sentMessage);
+        // Authenticate that the CDM was called by another wrapper at the same address
+        require(
+            messenger.crossDomainMessageSender() == address(this),
+            "PromiseAwareMessenger: not called by wrapper"
+        );
         
-        // Custom logic can go here (after)
+        // Set the cross-domain message sender for the duration of the call
+        xDomainMsgSender = _originalSender;
         
-        return returnData;
+        // Make the actual call to the target
+        (bool success, ) = _target.call(_message);
+        
+        // Reset the cross-domain message sender
+        xDomainMsgSender = DEFAULT_SENDER;
+        
+        emit WrapperMessageRelayed(_target, _originalSender, _message, success);
+        
+        // Don't revert on failure to match CDM behavior - let the calling contract handle failures
+    }
+    
+    /// @notice Get the original sender of the currently executing cross-domain message
+    /// @return The address of the original sender
+    function xDomainMessageSender() external view returns (address) {
+        require(
+            xDomainMsgSender != DEFAULT_SENDER,
+            "PromiseAwareMessenger: xDomainMessageSender is not set"
+        );
+        return xDomainMsgSender;
     }
     
     /// @notice Get the message nonce from underlying CDM
