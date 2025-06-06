@@ -91,7 +91,7 @@ contract LocalPromise {
     /// @param promiseId The promise whose callback to execute
     /// @param callbackIndex The index of the callback to execute  
     /// @return nextPromiseId The next promise ID if chaining (bytes32(0) if none)
-    function executeCallback(bytes32 promiseId, uint256 callbackIndex) external returns (bytes32 nextPromiseId) {
+    function executeCallback(bytes32 promiseId, uint256 callbackIndex) external virtual returns (bytes32 nextPromiseId) {
         PromiseState memory promiseState = promises[promiseId];
         require(promiseState.status != PromiseStatus.PENDING, "LocalPromise: promise not yet resolved");
         
@@ -132,7 +132,7 @@ contract LocalPromise {
     /// @notice Execute all callbacks for a resolved/rejected promise
     /// @param promiseId The promise whose callbacks to execute
     /// @return nextPromiseIds Array of next promise IDs from chaining
-    function executeAllCallbacks(bytes32 promiseId) external returns (bytes32[] memory nextPromiseIds) {
+    function executeAllCallbacks(bytes32 promiseId) external virtual returns (bytes32[] memory nextPromiseIds) {
         Callback[] storage callbackList = callbacks[promiseId];
         nextPromiseIds = new bytes32[](callbackList.length);
         uint256 nextCount = 0;

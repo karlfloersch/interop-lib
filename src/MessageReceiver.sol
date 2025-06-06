@@ -42,14 +42,25 @@ contract MessageReceiver is BaseMessenger {
         xDomainMsgSender = _originalSender;
         
         // Make the actual call to the target
-        (bool success, ) = _target.call(_message);
+        (bool success, bytes memory returnData) = _target.call(_message);
         
         // Reset execution context
         xDomainMsgSender = DEFAULT_SENDER;
         
         emit WrapperMessageRelayed(_target, _originalSender, _message, success);
         
-        // Don't revert on failure to match CDM behavior - let the calling contract handle failures
+        // Revert on failure to see what went wrong during testing
+        if (!success) {
+            // Decode the revert reason if possible
+            if (returnData.length > 0) {
+                assembly {
+                    let returnDataSize := mload(returnData)
+                    revert(add(32, returnData), returnDataSize)
+                }
+            } else {
+                revert("MessageReceiver: target call failed");
+            }
+        }
     }
     
     /// @notice Get the original sender of the currently executing cross-domain message
