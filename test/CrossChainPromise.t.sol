@@ -20,6 +20,14 @@ contract CrossChainPromiseTest is Relayer, Test {
     bool public remoteCallbackExecuted;
     uint256 public remoteReceivedValue;
     
+    // Nested promise test state
+    bool public nestedChainerExecuted;
+    uint256 public nestedChainerValue;
+    bool public finalProcessorExecuted;
+    uint256 public finalProcessorValue;
+    bool public nestedResultReaderExecuted;
+    uint256 public nestedResultReaderValue;
+    
     string[] private rpcUrls = [
         vm.envOr("CHAIN_A_RPC_URL", string("https://interop-alpha-0.optimism.io")),
         vm.envOr("CHAIN_B_RPC_URL", string("https://interop-alpha-1.optimism.io"))
@@ -47,6 +55,14 @@ contract CrossChainPromiseTest is Relayer, Test {
         callbackExecuted = false;
         remoteCallbackExecuted = false;
         remoteReceivedValue = 0;
+        
+        // Reset nested promise test state
+        nestedChainerExecuted = false;
+        nestedChainerValue = 0;
+        finalProcessorExecuted = false;
+        finalProcessorValue = 0;
+        nestedResultReaderExecuted = false;
+        nestedResultReaderValue = 0;
     }
     
     function test_create_promise() public {
@@ -195,6 +211,73 @@ contract CrossChainPromiseTest is Relayer, Test {
         console.log("Flow: Chain A ->", testValue, "-> Chain B -> Chain A ->", returnValue);
     }
     
+    function test_nested_cross_chain_promises() public {
+        vm.selectFork(forkIds[0]); // Start on chain A
+        
+        console.log("=== Testing Nested Cross-Chain Promise Chaining ===");
+        
+        // Create promise on chain A
+        bytes32 promiseId = promisesA.create();
+        console.log("Created promise on chain A");
+        
+        // Register cross-chain callback to chain B that will create nested promises
+        uint256 destinationChain = chainIdByForkId[forkIds[1]];
+        bytes32 remotePromiseId = promisesA.then(promiseId, destinationChain, this.nestedChainer.selector);
+        console.log("Registered nested chainer callback to chain B");
+        console.log("Remote promise ID (local proxy) created");
+        
+        // Chain a callback to the remote promise proxy to read the final nested result
+        bytes32 resultReaderPromise = promisesA.then(remotePromiseId, this.nestedResultReader.selector);
+        console.log("Chained result reader to remote promise proxy");
+        
+        // Resolve the original promise on chain A
+        uint256 testValue = 50;
+        promisesA.resolve(promiseId, abi.encode(testValue));
+        console.log("Resolved original promise with value:", testValue);
+        
+        // Execute callbacks on chain A (sends to chain B)
+        promisesA.executeAllCallbacks(promiseId);
+        console.log("Executed callbacks on chain A - cross-chain messages sent");
+        
+        // Relay messages to chain B
+        relayAllMessages();
+        console.log("Relayed messages to chain B");
+        
+        // Verify nested chainer executed on chain B
+        assertTrue(nestedChainerExecuted, "Nested chainer should have executed");
+        assertEq(nestedChainerValue, testValue, "Nested chainer should have received correct value");
+        console.log("Nested chainer executed with value:", nestedChainerValue);
+        
+        // Relay the nested promise messages back to chain A
+        relayAllMessages();
+        console.log("Relayed nested promise messages to chain A");
+        
+        // Verify final processor executed on chain A
+        assertTrue(finalProcessorExecuted, "Final processor should have executed");
+        assertEq(finalProcessorValue, testValue * 10, "Final processor should have received transformed value");
+        console.log("Final processor executed with value:", finalProcessorValue);
+        
+        // Switch back to chain A and verify the nested result propagated
+        vm.selectFork(forkIds[0]);
+        
+        // Check that original remote promise proxy was updated
+        (CrossChainPromise.PromiseStatus remoteStatus, bytes memory remoteValue,) = promisesA.promises(remotePromiseId);
+        assertEq(uint256(remoteStatus), 1, "Remote promise should be resolved");
+        
+        // Execute the callback chained to the remote promise proxy to read the nested result
+        promisesA.executeAllCallbacks(remotePromiseId);
+        console.log("Executed callbacks on remote promise proxy");
+        
+        // Verify the result reader got the final nested value
+        assertTrue(nestedResultReaderExecuted, "Nested result reader should have executed");
+        assertEq(nestedResultReaderValue, testValue * 10, "Result reader should have received nested result");
+        console.log("Result reader executed with nested value:", nestedResultReaderValue);
+        
+        console.log("SUCCESS: Nested cross-chain promise flow verified!");
+        console.log("Flow: Chain A ->", testValue, "-> Chain B (nested promise) -> Chain A ->", finalProcessorValue);
+        console.log("Final: Remote proxy updated and readable on Chain A with value:", nestedResultReaderValue);
+    }
+    
     function test_basic_cross_chain_call() public {
         vm.selectFork(forkIds[0]); // Start on chain A
         
@@ -251,5 +334,56 @@ contract CrossChainPromiseTest is Relayer, Test {
         require(msg.sender != address(0), "Called from zero address");
         
         return value * 2; // Transform the value to test return path
+    }
+    
+    /// @notice Nested chainer callback - creates a new promise on Chain B and chains it back to Chain A
+    function nestedChainer(uint256 value) external returns (uint256) {
+        nestedChainerExecuted = true;
+        nestedChainerValue = value;
+        console.log("Nested chainer executed with value:", value);
+        console.log("Creating nested promise on Chain B and chaining to Chain A");
+        
+        // Create a NEW promise on Chain B
+        bytes32 nestedPromise = promisesB.create();
+        console.log("Created nested promise on Chain B");
+        
+        // Chain the nested promise back to Chain A
+        uint256 chainAId = chainIdByForkId[forkIds[0]];
+        promisesB.then(nestedPromise, chainAId, this.finalProcessor.selector);
+        console.log("Chained nested promise back to Chain A");
+        
+        // Resolve the nested promise with transformed value
+        uint256 transformedValue = value * 10; // Transform: 50 -> 500
+        promisesB.resolve(nestedPromise, abi.encode(transformedValue));
+        console.log("Resolved nested promise with transformed value:", transformedValue);
+        
+        // Execute callbacks on the nested promise (sends back to Chain A)
+        promisesB.executeAllCallbacks(nestedPromise);
+        console.log("Executed nested promise callbacks - sending to Chain A");
+        
+        return transformedValue; // Return the transformed value
+    }
+    
+    /// @notice Final processor callback - executes on Chain A as the result of nested promise
+    function finalProcessor(uint256 value) external returns (uint256) {
+        finalProcessorExecuted = true;
+        finalProcessorValue = value;
+        console.log("Final processor executed on Chain A with value:", value);
+        console.log("Called from:", msg.sender);
+        
+        // Verify it's not a zero address call
+        require(msg.sender != address(0), "Called from zero address");
+        
+        return value; // Pass through the value
+    }
+    
+    /// @notice Result reader callback - reads the final nested result from the remote promise proxy
+    function nestedResultReader(uint256 value) external returns (uint256) {
+        nestedResultReaderExecuted = true;
+        nestedResultReaderValue = value;
+        console.log("Nested result reader executed on Chain A with value:", value);
+        console.log("This value came from the nested promise computation!");
+        
+        return value; // Pass through the value
     }
 } 
