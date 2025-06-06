@@ -16,6 +16,7 @@ contract LocalPromise {
         address target;
         bytes4 selector;
         bytes4 errorSelector;  // optional error handler
+        bytes32 nextPromiseId; // promise to auto-resolve with callback return value
     }
     
     /// @notice All promises by ID
@@ -42,19 +43,39 @@ contract LocalPromise {
     /// @notice Create a new pending promise
     /// @return promiseId The unique identifier for this promise
     function create() external returns (bytes32) {
-        bytes32 promiseId = keccak256(abi.encodePacked(msg.sender, ++nonce, block.timestamp));
+        return _createPromise(msg.sender);
+    }
+    
+    /// @notice Internal helper to create a promise with specified creator
+    function _createPromise(address creator) internal returns (bytes32) {
+        bytes32 promiseId = keccak256(abi.encodePacked(creator, ++nonce, block.timestamp));
         
         promises[promiseId] = PromiseState({
             status: PromiseStatus.PENDING,
             value: "",
-            creator: msg.sender
+            creator: creator
         });
         
-        emit PromiseCreated(promiseId, msg.sender);
+        emit PromiseCreated(promiseId, creator);
         return promiseId;
     }
     
-    /// @notice Resolve a promise with a value, executing all callbacks
+    /// @notice Internal helper to set promise state (no automatic execution)
+    function _setPromiseState(bytes32 promiseId, PromiseStatus status, bytes memory value) internal {
+        PromiseState storage promiseState = promises[promiseId];
+        require(promiseState.status == PromiseStatus.PENDING, "LocalPromise: already resolved or rejected");
+        
+        promiseState.status = status;
+        promiseState.value = value;
+        
+        if (status == PromiseStatus.RESOLVED) {
+            emit PromiseResolved(promiseId, value);
+        } else if (status == PromiseStatus.REJECTED) {
+            emit PromiseRejected(promiseId, value);
+        }
+    }
+    
+    /// @notice Resolve a promise with a value (callbacks must be executed separately)
     /// @param promiseId The promise to resolve
     /// @param value The value to resolve with
     function resolve(bytes32 promiseId, bytes calldata value) external {
@@ -63,35 +84,74 @@ contract LocalPromise {
         require(promiseState.creator == msg.sender, "LocalPromise: only creator can resolve");
         require(promiseState.status == PromiseStatus.PENDING, "LocalPromise: already resolved");
         
-        // Update promise state
-        promiseState.status = PromiseStatus.RESOLVED;
-        promiseState.value = value;
+        _setPromiseState(promiseId, PromiseStatus.RESOLVED, value);
+    }
+    
+    /// @notice Execute a specific callback for a resolved/rejected promise
+    /// @param promiseId The promise whose callback to execute
+    /// @param callbackIndex The index of the callback to execute  
+    /// @return nextPromiseId The next promise ID if chaining (bytes32(0) if none)
+    function executeCallback(bytes32 promiseId, uint256 callbackIndex) external returns (bytes32 nextPromiseId) {
+        PromiseState memory promiseState = promises[promiseId];
+        require(promiseState.status != PromiseStatus.PENDING, "LocalPromise: promise not yet resolved");
         
-        // Execute all success callbacks immediately (JavaScript-like behavior)
         Callback[] storage callbackList = callbacks[promiseId];
-        for (uint256 i = 0; i < callbackList.length; i++) {
-            Callback memory callback = callbackList[i];
-            
-            // Call the success callback function with the resolved value
-            (bool success,) = callback.target.call(
-                abi.encodePacked(callback.selector, value)
-            );
-            
-            // Auto-reject if callback fails (JavaScript-like behavior)
-            if (!success) {
-                // If callback fails, call error callback if available
-                if (callback.errorSelector != bytes4(0)) {
-                    callback.target.call(
-                        abi.encodeWithSelector(callback.errorSelector, abi.encode("Callback execution failed"))
-                    );
+        require(callbackIndex < callbackList.length, "LocalPromise: callback index out of bounds");
+        
+        Callback memory callback = callbackList[callbackIndex];
+        bool isError = promiseState.status == PromiseStatus.REJECTED;
+        
+        if (isError) {
+            // Execute error callback if available
+            if (callback.errorSelector != bytes4(0)) {
+                callback.target.call(abi.encodeWithSelector(callback.errorSelector, promiseState.value));
+            }
+        } else {
+            // Execute success callback and handle chaining
+            if (callback.selector != bytes4(0)) {
+                (bool success, bytes memory returnData) = callback.target.call(
+                    abi.encodePacked(callback.selector, promiseState.value)
+                );
+                
+                if (success && callback.nextPromiseId != bytes32(0)) {
+                    // Resolve next promise with callback return value (no recursion)
+                    _setPromiseState(callback.nextPromiseId, PromiseStatus.RESOLVED, returnData);
+                    nextPromiseId = callback.nextPromiseId;
+                } else if (!success) {
+                    // Handle callback failure
+                    if (callback.errorSelector != bytes4(0)) {
+                        callback.target.call(
+                            abi.encodeWithSelector(callback.errorSelector, abi.encode("Callback execution failed"))
+                        );
+                    }
                 }
             }
         }
-        
-        emit PromiseResolved(promiseId, value);
     }
     
-    /// @notice Reject a promise with an error reason, executing error callbacks
+    /// @notice Execute all callbacks for a resolved/rejected promise
+    /// @param promiseId The promise whose callbacks to execute
+    /// @return nextPromiseIds Array of next promise IDs from chaining
+    function executeAllCallbacks(bytes32 promiseId) external returns (bytes32[] memory nextPromiseIds) {
+        Callback[] storage callbackList = callbacks[promiseId];
+        nextPromiseIds = new bytes32[](callbackList.length);
+        uint256 nextCount = 0;
+        
+        for (uint256 i = 0; i < callbackList.length; i++) {
+            bytes32 nextPromiseId = this.executeCallback(promiseId, i);
+            if (nextPromiseId != bytes32(0)) {
+                nextPromiseIds[nextCount] = nextPromiseId;
+                nextCount++;
+            }
+        }
+        
+        // Resize array to actual count
+        assembly {
+            mstore(nextPromiseIds, nextCount)
+        }
+    }
+    
+    /// @notice Reject a promise with an error reason (callbacks must be executed separately)
     /// @param promiseId The promise to reject
     /// @param reason The error reason
     function reject(bytes32 promiseId, bytes calldata reason) external {
@@ -100,51 +160,31 @@ contract LocalPromise {
         require(promiseState.creator == msg.sender, "LocalPromise: only creator can reject");
         require(promiseState.status == PromiseStatus.PENDING, "LocalPromise: already resolved or rejected");
         
-        // Update promise state
-        promiseState.status = PromiseStatus.REJECTED;
-        promiseState.value = reason;
-        
-        // Execute all error callbacks immediately
-        Callback[] storage callbackList = callbacks[promiseId];
-        for (uint256 i = 0; i < callbackList.length; i++) {
-            Callback memory callback = callbackList[i];
-            
-            // Only call error callback if it's defined
-            if (callback.errorSelector != bytes4(0)) {
-                (bool success,) = callback.target.call(
-                    abi.encodeWithSelector(callback.errorSelector, reason)
-                );
-                // Ignore failures in error callbacks to prevent cascading failures
-            }
-        }
-        
-        emit PromiseRejected(promiseId, reason);
+        _setPromiseState(promiseId, PromiseStatus.REJECTED, reason);
     }
     
     /// @notice Register a callback to be executed when promise resolves or rejects
     /// @param promiseId The promise to listen to
     /// @param selector The function selector to call on success
     /// @param errorSelector The function selector to call on error (optional)
-    function then(bytes32 promiseId, bytes4 selector, bytes4 errorSelector) public {
+    /// @return nextPromiseId New promise ID for chaining (if success callback provided)
+    function then(bytes32 promiseId, bytes4 selector, bytes4 errorSelector) public returns (bytes32 nextPromiseId) {
         require(promises[promiseId].creator != address(0), "LocalPromise: promise does not exist");
+        
+        // Create new promise for chaining (if success callback provided)
+        if (selector != bytes4(0)) {
+            nextPromiseId = _createPromise(msg.sender);
+        }
         
         PromiseState memory promiseState = promises[promiseId];
         
-        // If already resolved/rejected, execute appropriate callback immediately
-        if (promiseState.status == PromiseStatus.RESOLVED) {
-            msg.sender.call(abi.encodePacked(selector, promiseState.value));
-        } else if (promiseState.status == PromiseStatus.REJECTED) {
-            if (errorSelector != bytes4(0)) {
-                msg.sender.call(abi.encodeWithSelector(errorSelector, promiseState.value));
-            }
-        } else {
-            // Register for future execution
-            callbacks[promiseId].push(Callback({
-                target: msg.sender,
-                selector: selector,
-                errorSelector: errorSelector
-            }));
-        }
+        // Always register callback (no automatic execution even for resolved promises)
+        callbacks[promiseId].push(Callback({
+            target: msg.sender,
+            selector: selector,
+            errorSelector: errorSelector,
+            nextPromiseId: nextPromiseId
+        }));
         
         emit CallbackRegistered(promiseId, msg.sender, selector, errorSelector);
     }
@@ -152,8 +192,9 @@ contract LocalPromise {
     /// @notice Register a callback to be executed when promise resolves (no error handler)
     /// @param promiseId The promise to listen to  
     /// @param selector The function selector to call on success
-    function then(bytes32 promiseId, bytes4 selector) external {
-        then(promiseId, selector, bytes4(0));
+    /// @return nextPromiseId New promise ID for chaining
+    function then(bytes32 promiseId, bytes4 selector) external returns (bytes32) {
+        return then(promiseId, selector, bytes4(0));
     }
     
     /// @notice Register an error callback to be executed when promise rejects
@@ -161,5 +202,35 @@ contract LocalPromise {
     /// @param errorSelector The function selector to call on error
     function onReject(bytes32 promiseId, bytes4 errorSelector) external {
         then(promiseId, bytes4(0), errorSelector);
+    }
+    
+    /// @notice Get the number of callbacks registered for a promise
+    /// @param promiseId The promise to query
+    /// @return Number of callbacks
+    function getCallbackCount(bytes32 promiseId) external view returns (uint256) {
+        return callbacks[promiseId].length;
+    }
+    
+    /// @notice Get a specific callback for a promise
+    /// @param promiseId The promise to query
+    /// @param index The callback index
+    /// @return callback The callback data
+    function getCallback(bytes32 promiseId, uint256 index) external view returns (Callback memory callback) {
+        require(index < callbacks[promiseId].length, "LocalPromise: callback index out of bounds");
+        return callbacks[promiseId][index];
+    }
+    
+    /// @notice Check if a promise is ready for callback execution
+    /// @param promiseId The promise to check
+    /// @return ready True if promise is resolved or rejected
+    function isReadyForExecution(bytes32 promiseId) external view returns (bool ready) {
+        return promises[promiseId].status != PromiseStatus.PENDING;
+    }
+    
+    /// @notice Get all callbacks for a promise
+    /// @param promiseId The promise to query
+    /// @return callbackList Array of all callbacks
+    function getAllCallbacks(bytes32 promiseId) external view returns (Callback[] memory callbackList) {
+        return callbacks[promiseId];
     }
 } 
