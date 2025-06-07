@@ -125,7 +125,7 @@ contract LocalPromise {
         if (isError) {
             // Execute error callback if available
             if (callback.errorSelector != bytes4(0)) {
-                callback.target.call(abi.encodeWithSelector(callback.errorSelector, promiseState.value));
+                callback.target.call(abi.encodePacked(callback.errorSelector, promiseState.value));
             }
         } else {
             // Execute success callback and handle chaining
@@ -142,7 +142,7 @@ contract LocalPromise {
                     // Handle callback failure
                     if (callback.errorSelector != bytes4(0)) {
                         callback.target.call(
-                            abi.encodeWithSelector(callback.errorSelector, abi.encode("Callback execution failed"))
+                            abi.encodePacked(callback.errorSelector, abi.encode("Callback execution failed"))
                         );
                     }
                 }

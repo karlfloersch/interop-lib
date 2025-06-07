@@ -271,7 +271,7 @@ contract CrossChainPromise is LocalPromise {
                     callbackSucceeded = false;
                     if (callback.errorSelector != bytes4(0)) {
                         callback.target.call(
-                            abi.encodeWithSelector(callback.errorSelector, abi.encode("Remote callback failed"))
+                            abi.encodePacked(callback.errorSelector, abi.encode("Remote callback failed"))
                         );
                     }
                 }
@@ -328,7 +328,7 @@ contract CrossChainPromise is LocalPromise {
         if (isError) {
             // Execute error callback if available
             if (callback.errorSelector != bytes4(0)) {
-                callback.target.call(abi.encodeWithSelector(callback.errorSelector, promiseState.value));
+                callback.target.call(abi.encodePacked(callback.errorSelector, promiseState.value));
             }
         } else {
             // Execute success callback and handle chaining
@@ -345,7 +345,7 @@ contract CrossChainPromise is LocalPromise {
                     // Handle callback failure
                     if (callback.errorSelector != bytes4(0)) {
                         callback.target.call(
-                            abi.encodeWithSelector(callback.errorSelector, abi.encode("Callback execution failed"))
+                            abi.encodePacked(callback.errorSelector, abi.encode("Callback execution failed"))
                         );
                     }
                 }

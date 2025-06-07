@@ -129,7 +129,7 @@ contract LocalPromiseTest is Test {
         
         // Verify error callback was executed
         assertTrue(errorCallbackExecuted);
-        assertEq(abi.decode(receivedError, (string)), errorMsg);
+        assertEq(string(receivedError), errorMsg);
         
         // Verify success callback was NOT executed
         assertFalse(callbackExecuted);
@@ -154,7 +154,7 @@ contract LocalPromiseTest is Test {
         
         // Verify error callback was executed
         assertTrue(errorCallbackExecuted);
-        assertEq(abi.decode(receivedError, (string)), errorMsg);
+        assertEq(string(receivedError), errorMsg);
     }
     
     function test_late_error_callback_registration() public {
@@ -174,7 +174,7 @@ contract LocalPromiseTest is Test {
         
         // Verify error callback was executed after manual execution
         assertTrue(errorCallbackExecuted);
-        assertEq(abi.decode(receivedError, (string)), errorMsg);
+        assertEq(string(receivedError), errorMsg);
     }
     
     function test_promise_chaining() public {
