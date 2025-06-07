@@ -20,14 +20,44 @@ promiseLib.resolve(promise, abi.encode(initialData));
 
 No complex message passing, no manual cross-chain coordination - just **promise chaining that works across chains as naturally as it works locally**.
 
-## 🏗️ What We Built
+## ✨ Features
 
-### Core Architecture
+### 🏗️ Core Promise System
+- **🔗 Promise Chaining**: Link promises together for sequential execution
+- **⚡ Manual Execution**: Gas-safe execution with explicit callback triggering
+- **🔒 Authorization**: Creator-only resolution/rejection with access controls
+- **🚨 Error Handling**: Comprehensive error callbacks and failure recovery
+- **🔄 Late Registration**: Register callbacks after promise resolution
+
+### 🌐 Cross-Chain Capabilities
+- **🌉 Cross-Chain Chaining**: Chain promises across different blockchains
+- **📡 Message Routing**: Automatic cross-chain message handling
+- **🏠 Local Proxy Pattern**: Immediate chaining without waiting for cross-chain messages
+- **🔐 Secure Authorization**: Cross-domain message sender validation
+- **🎯 Deterministic IDs**: Consistent promise IDs across all chains
+
+### 🛡️ Security & Safety
+- **👮 Access Control**: Multi-layer authorization for all critical operations
+- **🔐 Hash Security**: Collision-resistant hash generation for all operations
+- **🚫 Double Protection**: Prevention of double resolution/rejection
+- **⚠️ Edge Case Handling**: Comprehensive protection against invalid operations
+- **🔧 Callback Recovery**: Graceful handling of callback failures
+
+### 🎛️ Advanced Features
+- **📦 Promise.all**: Combine multiple promises with fail-fast behavior
+- **🔀 Mixed Data Types**: Support for different data types in promise results
+- **⛓️ Promise Chains**: Execute complex multi-step workflows
+- **📊 State Management**: Complete promise lifecycle tracking
+- **🏃 Execution Control**: Fine-grained control over promise execution
+
+## 🏗️ Core Architecture
 
 1. **`LocalPromise`** - Manual execution promise library with gas safety
 2. **`CrossChainPromise`** - Extends LocalPromise with cross-chain capabilities  
 3. **`PromiseAwareMessenger`** - Cross-chain message routing with promise context
-4. **Local Proxy Pattern** - Immediate chaining without waiting for cross-chain messages
+4. **`PromiseExecutor`** - Safe execution environment for promise chains
+5. **`PromiseAll`** - Utility for combining multiple promises
+6. **Local Proxy Pattern** - Immediate chaining without waiting for cross-chain messages
 
 ### Key Innovation: Local Proxy Promises
 
@@ -45,6 +75,100 @@ Behind the scenes:
 - **Deterministic IDs** ensure the same promise ID exists on all chains
 - **State synchronization** keeps local proxies in sync with remote execution
 - **Unified API** makes cross-chain feel like local development
+
+## 🧪 Featured Example: Promise.all with Callback Integration
+
+Our Promise.all feature demonstrates combining multiple promises with callback integration:
+
+```solidity
+function test_promise_all_with_callback_integration() public {
+    console.log("=== Testing Promise.all with Callback Integration ===");
+    
+    // Create multiple promises for parallel operations
+    bytes32 promise1 = promises.create();
+    bytes32 promise2 = promises.create();
+    
+    bytes32[] memory promiseIds = new bytes32[](2);
+    promiseIds[0] = promise1;
+    promiseIds[1] = promise2;
+    
+    // Create Promise.all to monitor completion
+    bytes32 allPromiseId = promiseAll.createAll(promiseIds);
+    
+    // Setup result processor that waits for all promises
+    bytes32 checkerPromise = promises.create();
+    promises.then(checkerPromise, this.handleAllResults.selector);
+    
+    // Resolve individual promises in parallel
+    promises.resolve(promise1, abi.encode(uint256(100)));
+    promises.resolve(promise2, abi.encode(uint256(200)));
+    
+    // Check if all promises completed and process results
+    (bool ready, bool failed, bytes[] memory results) = promiseAll.checkAll(allPromiseId);
+    
+    if (ready && !failed) {
+        // Calculate combined result from all promises
+        uint256 sum = abi.decode(results[0], (uint256)) + abi.decode(results[1], (uint256));
+        promises.resolve(checkerPromise, abi.encode(sum));
+        executor.executePromiseCallbacks(checkerPromise);
+    }
+    
+    // Verify callback executed with combined result
+    assertTrue(allCallbackExecuted, "Callback should have been executed");
+    assertEq(receivedValues[0], 300, "Should have received sum of both values");
+    
+    console.log("SUCCESS: Promise.all integrates with callback system");
+}
+
+function handleAllResults(uint256 combinedValue) external {
+    allCallbackExecuted = true;
+    receivedValues.push(combinedValue);
+    console.log("Combined result received:", combinedValue);
+}
+```
+
+### Promise.all Flow Diagram
+
+```mermaid
+graph TD
+    subgraph "Promise.all Integration Flow"
+        A["Promise 1<br/>Value: 100"] --> D["Promise.all<br/>Monitor"]
+        B["Promise 2<br/>Value: 200"] --> D
+        C["Promise 3<br/>(Optional)"] --> D
+        
+        D --> E{"All Ready?"}
+        E -->|"Yes"| F["Combine Results<br/>Sum: 300"]
+        E -->|"Any Failed"| G["Fail Fast<br/>Return Error"]
+        
+        F --> H["Checker Promise<br/>Combined Value"]
+        H --> I["Execute Callback<br/>handleAllResults()"]
+        I --> J["Final Result<br/>Processed: 300"]
+        
+        G --> K["Error Handler<br/>Process Failure"]
+    end
+    
+    subgraph "Promise States"
+        P1["PENDING"] --> P2["RESOLVED"]
+        P1 --> P3["REJECTED"]
+        P2 --> P4["CALLBACKS_EXECUTED"]
+        P3 --> P5["ERROR_HANDLED"]
+    end
+    
+    style A fill:#e1f5fe
+    style B fill:#e1f5fe
+    style D fill:#fff3e0
+    style F fill:#e8f5e8
+    style J fill:#e8f5e8
+    style G fill:#ffebee
+    style K fill:#ffebee
+```
+
+**Key Features Demonstrated:**
+- **🔄 Parallel Promise Creation**: Multiple promises can be created and resolved independently
+- **📦 Promise.all Monitoring**: Single interface to track completion of multiple promises
+- **⚡ Fail-Fast Behavior**: If any promise fails, Promise.all immediately fails
+- **🔗 Callback Integration**: Results can be automatically processed through the callback system
+- **🎯 Data Aggregation**: Multiple promise results can be combined into a single output
 
 ## 🧪 Working End-to-End Test
 
@@ -132,11 +256,25 @@ SUCCESS: Complete cross-chain promise end-to-end flow verified!
 
 ## 📊 Test Results
 
-**29/29 tests passing** across the full promise ecosystem:
-- LocalPromise: 17/17 tests ✅ (manual execution, gas safety, chaining)
-- PromiseAwareMessenger: 3/3 tests ✅ (cross-chain messaging)  
-- CrossChainPromise: 6/6 tests ✅ (including full e2e flow)
-- Promise: 3/3 tests ✅ (baseline functionality)
+**48/48 tests passing** across the comprehensive promise ecosystem:
+- **LocalPromise**: 17/17 tests ✅ (manual execution, gas safety, chaining)
+- **CrossChainPromise**: 7/7 tests ✅ (including full cross-chain e2e flow)
+- **SecurityTests**: 12/12 tests ✅ (authorization, edge cases, failure recovery)
+- **PromiseAllTests**: 6/6 tests ✅ (parallel promises, fail-fast, data aggregation)
+- **PromiseAwareMessenger**: 3/3 tests ✅ (cross-chain messaging)  
+- **Promise**: 3/3 tests ✅ (baseline functionality)
+
+### Security Test Coverage
+- **🔐 Cross-Chain Authorization**: 4 tests protecting unauthorized access to remote operations
+- **👮 Local Authorization**: 2 tests ensuring creator-only resolution/rejection
+- **⚠️ Edge Case Protection**: 5 tests covering double resolution/rejection protection
+- **🛠️ Failure Recovery**: 1 test for graceful callback failure handling
+
+### Promise.all Test Coverage  
+- **✅ Success Cases**: Multi-promise coordination and data aggregation
+- **💥 Failure Cases**: Early failure detection with fail-fast behavior
+- **🔀 Data Types**: Mixed data type support and proper encoding/decoding
+- **🎯 Edge Cases**: Empty arrays, single promises, and integration testing
 
 ## ⚠️ Missing Parts (This Might Not Work)
 
@@ -198,14 +336,22 @@ async function crossChainWorkflow() {
 ## 🧪 Running Tests
 
 ```bash
-# Run all tests
+# Run all tests (48 tests across 6 suites)
 forge test
 
-# Run just the cross-chain end-to-end test
-forge test --match-test test_cross_chain_promise_end_to_end -vv
+# Run specific test suites
+forge test --match-contract SecurityTestsTest       # Security & authorization tests
+forge test --match-contract PromiseAllTestsTest     # Promise.all functionality tests  
+forge test --match-contract CrossChainPromiseTest   # Cross-chain promise tests
 
-# Run with maximum verbosity to see the full flow
+# Run featured Promise.all integration test
+forge test --match-test test_promise_all_with_callback_integration -vv
+
+# Run cross-chain end-to-end test with full verbosity
 forge test --match-test test_cross_chain_promise_end_to_end -vvv
+
+# Run security tests to verify all protections
+forge test --match-contract SecurityTestsTest -vv
 ```
 
 ## 🤝 Contributing
