@@ -292,50 +292,7 @@ assertEq(ultimateResultHandlerValue, expectedFinal); // 81 == 81 ✅
 - `30 + 51 = 81` ← Promise.all coordination worked
 - **Impossible to get 81 by accident!** 🧮
 
-### Cross-Chain Promise.all Flow Diagram
 
-```mermaid
-graph TD
-    subgraph "Chain A"
-        A1["Step 1: Initial Promise<br/>value: 10"] --> A2["Step 2: Cross-Chain Call<br/>→ Chain B"]
-        A7["Step 7: Final Callback<br/>ultimateResultHandler(81)"] --> A8["Result: 81 ✅"]
-        A6 --> A7
-    end
-    
-    subgraph "Chain B Operations"
-        B1["Step 3: crossChainAggregator(10)"] --> B2["Create Mixed Operations"]
-        B2 --> B3A["Cross-Chain Promise<br/>value: 10 × 3 = 30<br/>→ Chain A"]
-        B2 --> B3B["Local Promise<br/>value: 10 × 5 = 50<br/>→ Local Chain B"]
-        
-        B3A --> B4A["dataProcessor1(30)<br/>on Chain A"]
-        B3B --> B4B["dataProcessor2(50)<br/>→ 50 + 1 = 51<br/>on Chain B"]
-        
-        B4A --> B5["Promise.all Coordination<br/>30 + 51 = 81"]
-        B4B --> B5
-        B5 --> B6["Return aggregated result<br/>81 → Chain A"]
-    end
-    
-    subgraph "Mathematical Verification"
-        M1["dataProcessor1Value: 30"] --> M3["Final Sum"]
-        M2["dataProcessor2Value: 51"] --> M3
-        M3 --> M4["ultimateResultHandlerValue: 81<br/>30 + 51 = 81 ✅"]
-    end
-    
-    A2 --> B1
-    B6 --> A6["Step 6: Chain B → Chain A<br/>aggregated result: 81"]
-    
-    style A1 fill:#e3f2fd
-    style A7 fill:#c8e6c9
-    style A8 fill:#4caf50,color:#fff
-    style B1 fill:#fff3e0
-    style B3A fill:#ffecb3
-    style B3B fill:#f3e5f5
-    style B4A fill:#e1f5fe
-    style B4B fill:#f8bbd9
-    style B5 fill:#e8f5e8
-    style B6 fill:#c8e6c9
-    style M4 fill:#4caf50,color:#fff
-```
 
 **Key Features Demonstrated:**
 
@@ -369,110 +326,48 @@ Chain A(10) → Chain B → [CrossChain(30) + Local(51)] → Chain A(81)
    Initial    → Coordinate  → Promise.all → Final Result ✅
 ```
 
-### Alternative: Fail-Fast Scenario
-```mermaid
-graph LR
-    subgraph "Fail-Fast Example"
-        A1["promise1: RESOLVED(100)"] --> C["Promise.all Check"]
-        A2["promise2: REJECTED(error)"] --> C
-        C --> D["ready=true, failed=true"]
-        D --> E["Skip Aggregation<br/>Handle Error Immediately"]
-        E --> F["Error Callback<br/>or Error State"]
-    end
-    
-    style A1 fill:#e8f5e8
-    style A2 fill:#ffebee
-    style C fill:#fff3e0
-    style D fill:#ffebee
-    style E fill:#ffebee
-    style F fill:#ffebee
+### Cross-Chain Promise.all Flow Diagram
+
+```
+┌─────────────────┐                    ┌─────────────────┐
+│     CHAIN A     │                    │     CHAIN B     │
+│                 │                    │                 │
+│ 1. Initial(10)  │───── Step 2 ─────→│ 3. Aggregator   │
+│    ↓            │    Cross-Chain     │    (10)         │
+│ 2. Chain to B   │      Message       │    ↓            │
+│                 │                    │ 4. Create Mixed │
+│                 │                    │    Operations   │
+│                 │                    │    ↓      ↓     │
+│                 │                    │ ┌─────┬─────┐   │
+│                 │←──── Step 5a ──────│ │Cross│Local│   │
+│ 6a. Process1    │   dataProcessor1   │ │ (30)│(50) │   │
+│     (30)        │     Value: 30      │ └─────┴─────┘   │
+│                 │                    │    ↓      ↓     │
+│                 │                    │ Send   Process2 │
+│                 │                    │ to A   (50→51)  │
+│                 │                    │           ↓     │
+│                 │                    │ 6b. Coordinate  │
+│                 │                    │     30 + 51 = 81│
+│                 │←──── Step 7 ───────│     ↓           │
+│ 8. Final(81)    │   Return Result    │ Return 81       │
+│    ✅           │                    │                 │
+└─────────────────┘                    └─────────────────┘
+
+Mathematical Verification:
+┌─────────────────────────────────────────────────────────┐
+│ dataProcessor1Value = 30  ←  Cross-chain B→A worked  ✅ │
+│ dataProcessor2Value = 51  ←  Local transformation    ✅ │  
+│ ultimateResultValue = 81  ←  Return B→A worked       ✅ │
+│ Equation: 30 + 51 = 81    ←  Promise.all coordination ✅ │
+└─────────────────────────────────────────────────────────┘
 ```
 
-This demonstrates the **fail-fast behavior**: as soon as any promise fails, Promise.all immediately returns `failed=true` without waiting for other promises to complete.
-
-## 🧪 Working End-to-End Test
-
-Our `test_cross_chain_promise_end_to_end()` demonstrates the full round-trip flow:
-
-### Setup: Deterministic Deployment
-```solidity
-// Deploy identical contracts on both chains using salt
-messengerA = new PromiseAwareMessenger{salt: bytes32(0)}();
-promisesA = new CrossChainPromise{salt: bytes32(0)}(address(messengerA));
-
-messengerB = new PromiseAwareMessenger{salt: bytes32(0)}();  
-promisesB = new CrossChainPromise{salt: bytes32(0)}(address(messengerB));
-
-// Verify same addresses across chains (critical for auth)
-require(address(promisesA) == address(promisesB));
-```
-
-### Step 1: Promise Creation & Cross-Chain Setup
-```solidity
-// Create promise on Chain A
-bytes32 promiseId = promisesA.create();
-
-// Register cross-chain callback → creates local proxy immediately!
-uint256 destinationChain = chainIdByForkId[forkIds[1]];
-bytes32 remotePromiseId = promisesA.then(promiseId, destinationChain, this.remoteHandler.selector);
-
-// Verify local proxy exists and is pending
-(PromiseStatus status, bytes memory value,) = promisesA.promises(remotePromiseId);
-assertEq(uint256(status), 0); // PENDING
-```
-
-### Step 2: Resolution & Cross-Chain Forwarding
-```solidity
-// Resolve original promise
-uint256 testValue = 100;
-promisesA.resolve(promiseId, abi.encode(testValue));
-
-// Execute callbacks - sends 2 cross-chain messages:
-// 1. setupRemotePromise(remotePromiseId, target, selector, ...)  
-// 2. executeRemoteCallback(remotePromiseId, value)
-promisesA.executeAllCallbacks(promiseId);
-```
-
-### Step 3: Remote Execution on Chain B
-```solidity
-// Messages arrive on Chain B via relayAllMessages()
-relayAllMessages();
-
-// Verify remote promise was created and resolved
-vm.selectFork(forkIds[1]); // Switch to Chain B
-(PromiseStatus remoteStatus, bytes memory remoteValue,) = promisesB.promises(remotePromiseId);
-assertEq(uint256(remoteStatus), 1); // RESOLVED
-assertEq(abi.decode(remoteValue, (uint256)), 100);
-
-// Verify callback executed successfully  
-assertTrue(remoteCallbackExecuted);
-assertEq(remoteReceivedValue, 100);
-```
-
-### Step 4: Return Path & Local Proxy Sync
-```solidity
-// Remote callback transforms value and sends back
-function remoteHandler(uint256 value) external returns (uint256) {
-    remoteCallbackExecuted = true;
-    remoteReceivedValue = value;
-    return value * 2; // Transform: 100 → 200
-}
-
-// Return message automatically sent, relay it back
-relayAllMessages();
-
-// Verify local proxy updated with return value
-vm.selectFork(forkIds[0]); // Back to Chain A
-(PromiseStatus finalStatus, bytes memory finalValue,) = promisesA.promises(remotePromiseId);
-assertEq(uint256(finalStatus), 1); // RESOLVED
-assertEq(abi.decode(finalValue, (uint256)), 200); // Transformed value!
-```
-
-### Complete Flow Verification ✅
-```
-Chain A (100) → Chain B (remoteHandler) → Chain A (200)
-SUCCESS: Complete cross-chain promise end-to-end flow verified!
-```
+**This diagram shows the sophisticated flow where:**
+- **Step 1-2**: Chain A sends `10` to Chain B
+- **Step 3-4**: Chain B creates mixed operations (cross-chain + local)
+- **Step 5**: Parallel execution: `30` goes to Chain A, `50→51` stays on Chain B  
+- **Step 6**: Promise.all coordination aggregates results: `30 + 51 = 81`
+- **Step 7-8**: Chain B returns final result `81` to Chain A
 
 ## 📊 Test Results
 

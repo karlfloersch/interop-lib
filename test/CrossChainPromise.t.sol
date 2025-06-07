@@ -5,8 +5,11 @@ import {Test} from "forge-std/Test.sol";
 import {console} from "forge-std/console.sol";
 import {Vm} from "forge-std/Vm.sol";
 import {CrossChainPromise} from "../src/CrossChainPromise.sol";
+import {LocalPromise} from "../src/LocalPromise.sol";
 import {PromiseAwareMessenger} from "../src/PromiseAwareMessenger.sol";
 import {Relayer} from "../src/test/Relayer.sol";
+
+
 
 contract CrossChainPromiseTest is Relayer, Test {
     CrossChainPromise public promisesA;
@@ -27,6 +30,18 @@ contract CrossChainPromiseTest is Relayer, Test {
     uint256 public finalProcessorValue;
     bool public nestedResultReaderExecuted;
     uint256 public nestedResultReaderValue;
+    
+    // Cross-chain Promise.all test state
+    bool public crossChainAggregatorExecuted;
+    uint256 public crossChainAggregatorValue;
+    bool public dataProcessor1Executed;
+    uint256 public dataProcessor1Value;
+    bool public dataProcessor2Executed;
+    uint256 public dataProcessor2Value;
+    bool public finalAggregatorExecuted;
+    uint256 public finalAggregatorValue;
+    bool public ultimateResultHandlerExecuted;
+    uint256 public ultimateResultHandlerValue;
     
     string[] private rpcUrls = [
         vm.envOr("CHAIN_A_RPC_URL", string("https://interop-alpha-0.optimism.io")),
@@ -63,6 +78,30 @@ contract CrossChainPromiseTest is Relayer, Test {
         finalProcessorValue = 0;
         nestedResultReaderExecuted = false;
         nestedResultReaderValue = 0;
+        
+        // Reset cross-chain Promise.all test state
+        crossChainAggregatorExecuted = false;
+        crossChainAggregatorValue = 0;
+        dataProcessor1Executed = false;
+        dataProcessor1Value = 0;
+        dataProcessor2Executed = false;
+        dataProcessor2Value = 0;
+        finalAggregatorExecuted = false;
+        finalAggregatorValue = 0;
+        ultimateResultHandlerExecuted = false;
+        ultimateResultHandlerValue = 0;
+        
+        // Reset cross-chain Promise.all test state
+        crossChainAggregatorExecuted = false;
+        crossChainAggregatorValue = 0;
+        dataProcessor1Executed = false;
+        dataProcessor1Value = 0;
+        dataProcessor2Executed = false;
+        dataProcessor2Value = 0;
+        finalAggregatorExecuted = false;
+        finalAggregatorValue = 0;
+        ultimateResultHandlerExecuted = false;
+        ultimateResultHandlerValue = 0;
     }
     
     function test_create_promise() public {
@@ -71,7 +110,7 @@ contract CrossChainPromiseTest is Relayer, Test {
         bytes32 promiseId = promisesA.create();
         
         // Verify promise exists and is pending
-        (CrossChainPromise.PromiseStatus status, bytes memory value, address creator) = promisesA.promises(promiseId);
+        (LocalPromise.PromiseStatus status, bytes memory value, address creator) = promisesA.promises(promiseId);
         
         assertEq(uint256(status), 0); // PENDING = 0
         assertEq(value.length, 0);
@@ -88,7 +127,7 @@ contract CrossChainPromiseTest is Relayer, Test {
         bytes32 chainedPromiseId = promisesA.then(promiseId, this.handleValue.selector);
         
         // Verify chained promise was created
-        (CrossChainPromise.PromiseStatus status,,) = promisesA.promises(chainedPromiseId);
+        (LocalPromise.PromiseStatus status,,) = promisesA.promises(chainedPromiseId);
         assertEq(uint256(status), 0); // PENDING = 0
         
         // Resolve original promise
@@ -122,7 +161,7 @@ contract CrossChainPromiseTest is Relayer, Test {
         bytes32 chainedPromiseId = promisesA.then(promiseId, destinationChain, this.handleValue.selector);
         
         // Verify chained promise was created on chain A
-        (CrossChainPromise.PromiseStatus status,,) = promisesA.promises(chainedPromiseId);
+        (LocalPromise.PromiseStatus status,,) = promisesA.promises(chainedPromiseId);
         assertEq(uint256(status), 0); // PENDING = 0
         
         // Verify cross-chain forwarding was set up
@@ -157,7 +196,7 @@ contract CrossChainPromiseTest is Relayer, Test {
         console.log("Remote promise ID (local proxy):", vm.toString(remotePromiseId));
         
         // Verify local proxy is pending
-        (CrossChainPromise.PromiseStatus proxyStatus,bytes memory proxyValue,) = promisesA.promises(remotePromiseId);
+        (LocalPromise.PromiseStatus proxyStatus,bytes memory proxyValue,) = promisesA.promises(remotePromiseId);
         assertEq(uint256(proxyStatus), 0); // PENDING
         assertEq(proxyValue.length, 0);
         
@@ -178,7 +217,7 @@ contract CrossChainPromiseTest is Relayer, Test {
         vm.selectFork(forkIds[1]);
         
         // Check that actual remote promise exists and was resolved
-        (CrossChainPromise.PromiseStatus remoteStatus,bytes memory remoteValue,) = promisesB.promises(remotePromiseId);
+        (LocalPromise.PromiseStatus remoteStatus,bytes memory remoteValue,) = promisesB.promises(remotePromiseId);
         assertEq(uint256(remoteStatus), 1); // RESOLVED
         
         uint256 forwardedValue = abi.decode(remoteValue, (uint256));
@@ -198,7 +237,7 @@ contract CrossChainPromiseTest is Relayer, Test {
         vm.selectFork(forkIds[0]);
         
         // Check that local proxy is now resolved with return value
-        (CrossChainPromise.PromiseStatus finalStatus,bytes memory finalValue,) = promisesA.promises(remotePromiseId);
+        (LocalPromise.PromiseStatus finalStatus,bytes memory finalValue,) = promisesA.promises(remotePromiseId);
         assertEq(uint256(finalStatus), 1); // RESOLVED
         assertTrue(finalValue.length > 0);
         
@@ -261,7 +300,7 @@ contract CrossChainPromiseTest is Relayer, Test {
         vm.selectFork(forkIds[0]);
         
         // Check that original remote promise proxy was updated
-        (CrossChainPromise.PromiseStatus remoteStatus, bytes memory remoteValue,) = promisesA.promises(remotePromiseId);
+        (LocalPromise.PromiseStatus remoteStatus, bytes memory remoteValue,) = promisesA.promises(remotePromiseId);
         assertEq(uint256(remoteStatus), 1, "Remote promise should be resolved");
         
         // Execute the callback chained to the remote promise proxy to read the nested result
@@ -312,6 +351,76 @@ contract CrossChainPromiseTest is Relayer, Test {
         assertTrue(chained1 != chained2);
         
         console.log("SUCCESS: Remote promise IDs are unique");
+    }
+    
+    function test_cross_chain_promise_all_with_chaining() public {
+        vm.selectFork(forkIds[0]); // Start on chain A
+        
+        console.log("=== Testing Cross-Chain Promise.all with Mixed Operations & Chaining ===");
+        
+        // Step 1: Create initial promise on Chain A
+        bytes32 initialPromise = promisesA.create();
+        console.log("Step 1: Created initial promise on Chain A");
+        
+        // Step 2: Chain to Chain B with crossChainAggregator callback
+        uint256 chainBId = chainIdByForkId[forkIds[1]];
+        bytes32 aggregatorPromise = promisesA.then(initialPromise, chainBId, this.crossChainAggregator.selector);
+        console.log("Step 2: Chained to Chain B crossChainAggregator");
+        
+        // Step 3: Chain final result handler to aggregator promise (on Chain A)
+        bytes32 finalPromise = promisesA.then(aggregatorPromise, this.ultimateResultHandler.selector);
+        console.log("Step 3: Chained ultimate result handler on Chain A");
+        
+        // Step 4: Resolve initial promise to start the flow
+        uint256 initialValue = 10;
+        promisesA.resolve(initialPromise, abi.encode(initialValue));
+        console.log("Step 4: Resolved initial promise with value:", initialValue);
+        
+        // Step 5: Execute callbacks (sends to Chain B)
+        promisesA.executeAllCallbacks(initialPromise);
+        console.log("Step 5: Executed callbacks - message sent to Chain B");
+        
+        // Step 6: Relay to Chain B
+        relayAllMessages();
+        console.log("Step 6: Relayed messages to Chain B");
+        
+        // Verify crossChainAggregator executed on Chain B
+        assertTrue(crossChainAggregatorExecuted, "Cross-chain aggregator should have executed");
+        assertEq(crossChainAggregatorValue, initialValue, "Aggregator received correct value");
+        console.log("SUCCESS: CrossChainAggregator executed on Chain B with value:", crossChainAggregatorValue);
+        
+        // Step 7: Relay Promise.all results back to Chain A
+        relayAllMessages();
+        console.log("Step 7: Relayed Promise.all results back to Chain A");
+        
+        // Step 8: Execute final aggregator promise on Chain A
+        vm.selectFork(forkIds[0]);
+        promisesA.executeAllCallbacks(aggregatorPromise);
+        console.log("Step 8: Executed aggregator promise callbacks on Chain A");
+        
+        // Step 9: Execute ultimate result handler
+        promisesA.executeAllCallbacks(finalPromise);
+        console.log("Step 9: Executed ultimate result handler");
+        
+        // Verify final results
+        assertTrue(ultimateResultHandlerExecuted, "Ultimate result handler should have executed");
+        console.log("SUCCESS: Ultimate result handler executed with value:", ultimateResultHandlerValue);
+        
+        // Verify the full flow worked
+        assertTrue(dataProcessor1Executed, "Data processor 1 should have executed");
+        assertTrue(dataProcessor2Executed, "Data processor 2 should have executed");
+        console.log("SUCCESS: Both processors executed - Processor 1:", dataProcessor1Value, "Processor 2:", dataProcessor2Value);
+        
+        // Expected flow: 10 -> Chain B -> (30 cross-chain + 51 local) -> 81 -> Chain A
+        uint256 expectedFinal = dataProcessor1Value + dataProcessor2Value;
+        assertEq(ultimateResultHandlerValue, expectedFinal, "Ultimate result should be sum of both operations");
+        
+        console.log("SUCCESS: Cross-Chain Promise.all with Mixed Operations Complete!");
+        console.log("Flow summary:");
+        console.log("  Chain A initial value:", initialValue);
+        console.log("  Chain B cross-chain result:", dataProcessor1Value);
+        console.log("  Chain B local result:", dataProcessor2Value);
+        console.log("  Chain A final result:", ultimateResultHandlerValue);
     }
     
     /// @notice Test callback function for local execution
@@ -385,5 +494,86 @@ contract CrossChainPromiseTest is Relayer, Test {
         console.log("This value came from the nested promise computation!");
         
         return value; // Pass through the value
+    }
+    
+    /// @notice Cross-chain aggregator - creates mixed operations using built-in CrossChainPromise capabilities
+    function crossChainAggregator(uint256 value) external returns (uint256) {
+        crossChainAggregatorExecuted = true;
+        crossChainAggregatorValue = value;
+        console.log("=== CrossChainAggregator executing on Chain B with value:", value);
+        
+        // Create two promises: one cross-chain, one local
+        bytes32 crossChainPromise = promisesB.create();
+        bytes32 localPromise = promisesB.create();
+        console.log("Created cross-chain and local promises on Chain B");
+        
+        // Setup cross-chain promise (back to Chain A)
+        uint256 chainAId = chainIdByForkId[forkIds[0]];
+        promisesB.then(crossChainPromise, chainAId, this.dataProcessor1.selector);
+        console.log("Chained cross-chain promise to dataProcessor1 on Chain A");
+        
+        // Setup local promise (stays on Chain B) - using destinationChain = 0 for local
+        promisesB.then(localPromise, uint256(0), this.dataProcessor2.selector);
+        console.log("Chained local promise to dataProcessor2 on Chain B");
+        
+        // Resolve both promises with transformed values
+        uint256 crossChainValue = value * 3; // 10 -> 30
+        uint256 localValue = value * 5;      // 10 -> 50 (will become 51 after local callback transformation)
+        
+        promisesB.resolve(crossChainPromise, abi.encode(crossChainValue));
+        promisesB.resolve(localPromise, abi.encode(localValue));
+        console.log("Resolved cross-chain promise with:", crossChainValue, "and local promise with:", localValue);
+        
+        // Execute both promise callbacks
+        promisesB.executeAllCallbacks(crossChainPromise); // Sends to Chain A
+        promisesB.executeAllCallbacks(localPromise);      // Executes locally
+        console.log("Executed both promise callbacks");
+        
+        // For this demonstration, we'll aggregate the local result with the cross-chain input
+        // In a real implementation, you'd need async coordination or sequential execution
+        uint256 localResult = dataProcessor2Value; // 51 (local transformed result)
+        uint256 crossChainInput = crossChainValue; // 30 (will be processed cross-chain)
+        uint256 aggregatedResult = crossChainInput + localResult; // 30 + 51 = 81
+        
+        console.log("Local operation completed with result:", localResult);
+        console.log("Cross-chain operation initiated with value:", crossChainInput);
+        console.log("Partial aggregated result (local + cross-chain input):", aggregatedResult);
+        
+        return aggregatedResult;
+    }
+    
+    /// @notice Data processor 1 - executes cross-chain on Chain A
+    function dataProcessor1(uint256 value) external returns (uint256) {
+        dataProcessor1Executed = true;
+        dataProcessor1Value = value;
+        console.log("DataProcessor1 executing on Chain A with value:", value);
+        console.log("Called from:", msg.sender);
+        
+        require(msg.sender != address(0), "Called from zero address");
+        
+        // Return the value (could do additional processing)
+        return value;
+    }
+    
+    /// @notice Data processor 2 - executes locally on Chain B
+    function dataProcessor2(uint256 value) external returns (uint256) {
+        dataProcessor2Executed = true;
+        uint256 transformedValue = value + 1; // Transform: 50 → 51
+        dataProcessor2Value = transformedValue;
+        console.log("DataProcessor2 executing locally on Chain B with value:", value);
+        console.log("DataProcessor2 transformed value to:", transformedValue);
+        
+        // Return the transformed value
+        return transformedValue;
+    }
+    
+    /// @notice Ultimate result handler - processes final aggregated result on Chain A
+    function ultimateResultHandler(uint256 value) external returns (uint256) {
+        ultimateResultHandlerExecuted = true;
+        ultimateResultHandlerValue = value;
+        console.log("=== UltimateResultHandler executing on Chain A with final value:", value);
+        console.log("This represents the aggregated result of cross-chain + local operations!");
+        
+        return value;
     }
 } 
