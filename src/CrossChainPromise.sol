@@ -258,8 +258,9 @@ contract CrossChainPromise is LocalPromise {
             Callback memory callback = callbackList[i];
             
             if (callback.selector != bytes4(0)) {
-                (bool success, bytes memory returnData) = callback.target.call(
-                    abi.encodePacked(callback.selector, value)
+                // Use the same unified encoding approach as LocalPromise
+                (bool success, bytes memory returnData) = _callCallbackWithProperEncoding(
+                    callback.target, callback.selector, value
                 );
                 
                 emit CrossChainCallbackExecuted(remotePromiseId, success, returnData);
@@ -332,8 +333,8 @@ contract CrossChainPromise is LocalPromise {
         } else {
             // Execute success callback and handle chaining
             if (callback.selector != bytes4(0)) {
-                (bool success, bytes memory returnData) = callback.target.call(
-                    abi.encodePacked(callback.selector, promiseState.value)
+                (bool success, bytes memory returnData) = _callCallbackWithProperEncoding(
+                    callback.target, callback.selector, promiseState.value
                 );
                 
                 if (success && callback.nextPromiseId != bytes32(0)) {
