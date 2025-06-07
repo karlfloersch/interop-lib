@@ -127,48 +127,160 @@ function handleAllResults(uint256 combinedValue) external {
 }
 ```
 
-### Promise.all Flow Diagram
+## 📋 Step-by-Step Walkthrough: Promise.all Integration
+
+Let's break down exactly what happens in the Promise.all test, step by step:
+
+### Step 1: Setup & Promise Creation
+```solidity
+// Create multiple promises for parallel operations
+bytes32 promise1 = promises.create();  // Creates Promise ID: 0xabc...
+bytes32 promise2 = promises.create();  // Creates Promise ID: 0xdef...
+
+bytes32[] memory promiseIds = new bytes32[](2);
+promiseIds[0] = promise1;
+promiseIds[1] = promise2;
+```
+**What's happening**: Two independent promises are created. Each gets a unique ID and starts in `PENDING` state.
+
+### Step 2: Promise.all Monitor Setup
+```solidity
+// Create Promise.all to monitor completion
+bytes32 allPromiseId = promiseAll.createAll(promiseIds);
+```
+**What's happening**: The PromiseAll contract creates a monitoring structure that tracks both promises. It stores:
+- Array of promise IDs to watch: `[0xabc..., 0xdef...]`
+- Current resolved count: `0`
+- Total count needed: `2`
+- Results array: `[empty, empty]`
+
+### Step 3: Result Processor Setup
+```solidity
+// Setup result processor that waits for all promises
+bytes32 checkerPromise = promises.create();  // Creates Promise ID: 0x123...
+promises.then(checkerPromise, this.handleAllResults.selector);
+```
+**What's happening**: We create a third promise that will receive the combined results and register a callback to process them.
+
+### Step 4: Parallel Promise Resolution
+```solidity
+// Resolve individual promises in parallel
+promises.resolve(promise1, abi.encode(uint256(100)));  // promise1: PENDING → RESOLVED(100)
+promises.resolve(promise2, abi.encode(uint256(200)));  // promise2: PENDING → RESOLVED(200)
+```
+**What's happening**: Both promises are resolved with their individual values. They can be resolved in any order.
+
+### Step 5: Promise.all Status Check
+```solidity
+// Check if all promises completed and process results
+(bool ready, bool failed, bytes[] memory results) = promiseAll.checkAll(allPromiseId);
+```
+**What's happening**: The checkAll function:
+- Iterates through all tracked promises: `[promise1, promise2]`
+- Checks their status: `[RESOLVED(100), RESOLVED(200)]`
+- Since both are resolved: `ready = true, failed = false`
+- Returns results: `[abi.encode(100), abi.encode(200)]`
+
+### Step 6: Result Aggregation & Processing
+```solidity
+if (ready && !failed) {
+    // Calculate combined result from all promises
+    uint256 sum = abi.decode(results[0], (uint256)) + abi.decode(results[1], (uint256));
+    // sum = 100 + 200 = 300
+    
+    promises.resolve(checkerPromise, abi.encode(sum));  // checkerPromise: PENDING → RESOLVED(300)
+    executor.executePromiseCallbacks(checkerPromise);   // Trigger handleAllResults(300)
+}
+```
+**What's happening**: Since all promises are ready and none failed, we:
+- Decode both results: `100` and `200`
+- Calculate the sum: `300`
+- Resolve the checker promise with the combined result
+- Execute the callback which calls `handleAllResults(300)`
+
+### Step 7: Final Callback Execution
+```solidity
+function handleAllResults(uint256 combinedValue) external {
+    allCallbackExecuted = true;           // Set flag to true
+    receivedValues.push(combinedValue);   // Store 300 in array
+    console.log("Combined result received:", combinedValue);  // Log: "Combined result received: 300"
+}
+```
+**What's happening**: The final callback receives the aggregated result and processes it.
+
+### Promise.all Step-by-Step Flow Diagram
 
 ```mermaid
 graph TD
-    subgraph "Promise.all Integration Flow"
-        A["Promise 1<br/>Value: 100"] --> D["Promise.all<br/>Monitor"]
-        B["Promise 2<br/>Value: 200"] --> D
-        C["Promise 3<br/>(Optional)"] --> D
-        
-        D --> E{"All Ready?"}
-        E -->|"Yes"| F["Combine Results<br/>Sum: 300"]
-        E -->|"Any Failed"| G["Fail Fast<br/>Return Error"]
-        
-        F --> H["Checker Promise<br/>Combined Value"]
-        H --> I["Execute Callback<br/>handleAllResults()"]
-        I --> J["Final Result<br/>Processed: 300"]
-        
-        G --> K["Error Handler<br/>Process Failure"]
+    subgraph "Step-by-Step Promise.all Flow"
+        S1["Step 1: Create Promises<br/>promise1: PENDING<br/>promise2: PENDING"] --> S2["Step 2: Setup Monitor<br/>promiseAll.createAll([promise1, promise2])"]
+        S2 --> S3["Step 3: Setup Result Processor<br/>checkerPromise: PENDING<br/>+ handleAllResults callback"]
+        S3 --> S4A["Step 4a: Resolve promise1<br/>promise1: RESOLVED(100)"]
+        S3 --> S4B["Step 4b: Resolve promise2<br/>promise2: RESOLVED(200)"]
+        S4A --> S5["Step 5: Check All Status<br/>promiseAll.checkAll()"]
+        S4B --> S5
+        S5 --> S6A{"All Ready?<br/>ready=true, failed=false"}
+        S6A -->|"Yes"| S6B["Step 6: Aggregate Results<br/>sum = 100 + 200 = 300<br/>Resolve checkerPromise(300)"]
+        S6A -->|"Any Failed"| S6C["Fail Fast<br/>Handle Error"]
+        S6B --> S7["Step 7: Execute Callback<br/>executor.executePromiseCallbacks()<br/>→ handleAllResults(300)"]
+        S7 --> S8["Final: Callback Executed<br/>allCallbackExecuted = true<br/>receivedValues = [300]"]
     end
     
-    subgraph "Promise States"
-        P1["PENDING"] --> P2["RESOLVED"]
-        P1 --> P3["REJECTED"]
-        P2 --> P4["CALLBACKS_EXECUTED"]
-        P3 --> P5["ERROR_HANDLED"]
+    subgraph "Data Flow"
+        D1["promise1: 100"] --> D3["Promise.all<br/>Monitor"]
+        D2["promise2: 200"] --> D3
+        D3 --> D4["Combined: 300"]
+        D4 --> D5["Final Callback<br/>Result: 300"]
     end
     
-    style A fill:#e1f5fe
-    style B fill:#e1f5fe
-    style D fill:#fff3e0
-    style F fill:#e8f5e8
-    style J fill:#e8f5e8
-    style G fill:#ffebee
-    style K fill:#ffebee
+    style S1 fill:#e3f2fd
+    style S2 fill:#e8f5e8
+    style S3 fill:#fff3e0
+    style S4A fill:#e1f5fe
+    style S4B fill:#e1f5fe
+    style S5 fill:#f3e5f5
+    style S6B fill:#e8f5e8
+    style S7 fill:#e8f5e8
+    style S8 fill:#c8e6c9
+    style S6C fill:#ffebee
 ```
 
 **Key Features Demonstrated:**
-- **🔄 Parallel Promise Creation**: Multiple promises can be created and resolved independently
-- **📦 Promise.all Monitoring**: Single interface to track completion of multiple promises
-- **⚡ Fail-Fast Behavior**: If any promise fails, Promise.all immediately fails
-- **🔗 Callback Integration**: Results can be automatically processed through the callback system
-- **🎯 Data Aggregation**: Multiple promise results can be combined into a single output
+- **🔄 Parallel Promise Creation** (Steps 1, 4): Multiple promises created and resolved independently in any order
+- **📦 Promise.all Monitoring** (Steps 2, 5): Single interface tracks completion status of multiple promises
+- **⚡ Fail-Fast Behavior** (Step 6): If any promise fails, Promise.all immediately returns failed state
+- **🔗 Callback Integration** (Steps 3, 7): Results automatically processed through the promise callback system
+- **🎯 Data Aggregation** (Step 6): Multiple promise results combined into single output (100 + 200 = 300)
+- **🔄 Execution Control** (Step 7): Manual execution via PromiseExecutor for gas safety
+- **📊 State Verification** (Step 8): Complete verification that callbacks executed with correct aggregated data
+
+### Execution Flow Summary:
+```
+Create → Monitor → Setup → Resolve → Check → Aggregate → Execute → Verify
+  ↓        ↓        ↓        ↓       ↓        ↓         ↓        ↓
+2 Promises → Promise.all → Callback → 100,200 → Ready → Sum=300 → Handle → ✅
+```
+
+### Alternative: Fail-Fast Scenario
+```mermaid
+graph LR
+    subgraph "Fail-Fast Example"
+        A1["promise1: RESOLVED(100)"] --> C["Promise.all Check"]
+        A2["promise2: REJECTED(error)"] --> C
+        C --> D["ready=true, failed=true"]
+        D --> E["Skip Aggregation<br/>Handle Error Immediately"]
+        E --> F["Error Callback<br/>or Error State"]
+    end
+    
+    style A1 fill:#e8f5e8
+    style A2 fill:#ffebee
+    style C fill:#fff3e0
+    style D fill:#ffebee
+    style E fill:#ffebee
+    style F fill:#ffebee
+```
+
+This demonstrates the **fail-fast behavior**: as soon as any promise fails, Promise.all immediately returns `failed=true` without waiting for other promises to complete.
 
 ## 🧪 Working End-to-End Test
 
