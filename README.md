@@ -1,6 +1,7 @@
 # Cross-Chain Promise Library 🌉
 
 **⚠️ EXPERIMENTAL PROJECT ⚠️**
+**⚠️ MAY CONTAIN AI SLOP ⚠️**
 
 This is a test project for experimentation, focused specifically on building a **cross-chain promise library** that enables JavaScript-like promise chaining across multiple blockchains. Think `async/await` but for cross-chain smart contract development.
 
