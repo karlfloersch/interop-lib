@@ -46,7 +46,7 @@ contract MessageSender is BaseMessenger {
     /// @notice Create a deterministic hash for message tracking
     /// @dev This hash is independent of CDM's message hash and used for future promise tracking
     function _createDeterministicHash(uint256 _destination, address _originalSender, address _target, bytes calldata _message) internal view returns (bytes32) {
-        return keccak256(abi.encodePacked(
+        return keccak256(abi.encode(
             block.chainid,   // source chain
             _destination,    // destination chain
             _originalSender, // original sender

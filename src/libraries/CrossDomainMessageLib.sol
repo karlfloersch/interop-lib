@@ -76,7 +76,7 @@ library CrossDomainMessageLib {
         if (_id.timestamp > type(uint64).max) revert TimestampTooHigh();
 
         // Hash the origin address and message hash together
-        bytes32 logHash = keccak256(abi.encodePacked(_id.origin, _msgHash));
+        bytes32 logHash = keccak256(abi.encode(_id.origin, _msgHash));
 
         // Downsize the identifier fields to match the needed type for the custom checksum calculation.
         uint64 blockNumber = uint64(_id.blockNumber);
@@ -87,10 +87,10 @@ library CrossDomainMessageLib {
         bytes32 idPacked = bytes32(abi.encodePacked(uint96(0), blockNumber, timestamp, logIndex));
 
         // Hash the logHash with the packed identifier data
-        bytes32 idLogHash = keccak256(abi.encodePacked(logHash, idPacked));
+        bytes32 idLogHash = keccak256(abi.encode(logHash, idPacked));
 
         // Create the final hash by combining idLogHash with chainId
-        bytes32 bareChecksum = keccak256(abi.encodePacked(idLogHash, _id.chainId));
+        bytes32 bareChecksum = keccak256(abi.encode(idLogHash, _id.chainId));
 
         // Apply bit masking to create the final checksum
         checksum_ = (bareChecksum & _MSB_MASK) | _TYPE_3_MASK;

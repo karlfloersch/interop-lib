@@ -69,7 +69,7 @@ contract LocalPromise {
     
     /// @notice Internal helper to create a promise with specified creator
     function _createPromise(address creator) internal returns (bytes32) {
-        bytes32 promiseId = keccak256(abi.encodePacked(creator, ++nonce, block.timestamp));
+        bytes32 promiseId = keccak256(abi.encode(creator, ++nonce, block.timestamp));
         
         promises[promiseId] = PromiseState({
             status: PromiseStatus.PENDING,

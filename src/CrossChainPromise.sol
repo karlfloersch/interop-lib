@@ -187,7 +187,7 @@ contract CrossChainPromise is LocalPromise {
         address target,
         bytes4 selector
     ) internal view returns (bytes32) {
-        return keccak256(abi.encodePacked(
+        return keccak256(abi.encode(
             sourceChain,
             sourceNonce,
             destinationChain,
