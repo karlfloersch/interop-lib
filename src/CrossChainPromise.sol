@@ -36,6 +36,15 @@ contract CrossChainPromise is LocalPromise {
         bool isActive;
     }
     
+    /// @notice Structure for remote promise state query results
+    struct RemotePromiseState {
+        bytes32 promiseId;      // The remote promise ID
+        PromiseStatus status;   // Status of the remote promise
+        bytes value;           // Value/reason from the remote promise
+        address creator;       // Creator of the remote promise
+        bool exists;          // Whether the promise exists (creator != address(0))
+    }
+    
     /// @notice Event emitted when a cross-chain promise is created
     event CrossChainPromiseCreated(
         bytes32 indexed promiseId,
@@ -51,6 +60,15 @@ contract CrossChainPromise is LocalPromise {
         bool success,
         bytes returnData
     );
+    
+    /// @notice Event emitted when a cross-chain promise state query is sent
+    event CrossChainQuerySent(bytes32 indexed queryPromiseId, uint256 remoteChain, bytes32 remotePromiseId);
+    
+    /// @notice Event emitted when a cross-chain promise state query response is sent
+    event CrossChainQueryResponse(bytes32 indexed queriedPromiseId, uint256 responseChain, bytes32 responsePromiseId);
+    
+    /// @notice Event emitted when a cross-chain promise state query is resolved
+    event CrossChainQueryResolved(bytes32 indexed queryPromiseId, bytes32 remotePromiseId, PromiseStatus remoteStatus);
     
     modifier onlyPromiseLibrary() {
         require(msg.sender == address(messenger), "CrossChainPromise: not from messenger");
@@ -472,5 +490,82 @@ contract CrossChainPromise is LocalPromise {
                 forwardData.isActive = false;
             }
         }
+    }
+    
+    /// @notice Query the state of a promise on a remote chain
+    /// @param remoteChain The chain ID where the promise exists
+    /// @param promiseId The promise ID to query
+    /// @return queryPromiseId Promise ID that will resolve with the remote promise state
+    function queryRemotePromiseState(uint256 remoteChain, bytes32 promiseId) 
+        external returns (bytes32 queryPromiseId) {
+        
+        // Create a local promise for the query result
+        queryPromiseId = _createPromise(msg.sender);
+        
+        // Send query message to remote chain
+        bytes memory queryMessage = abi.encodeCall(
+            this.getPromiseState, 
+            (promiseId, block.chainid, queryPromiseId)
+        );
+        
+        messenger.sendMessage(remoteChain, address(this), queryMessage);
+        
+        emit CrossChainQuerySent(queryPromiseId, remoteChain, promiseId);
+    }
+    
+    /// @notice Get the state of a local promise (called from remote chain)
+    /// @param promiseId The promise ID to query
+    /// @param responseChain The chain to send the response to
+    /// @param responsePromiseId The promise ID on the response chain to resolve
+    function getPromiseState(bytes32 promiseId, uint256 responseChain, bytes32 responsePromiseId) 
+        external onlyPromiseLibrary {
+        
+        PromiseState memory promiseState = promises[promiseId];
+        
+        // Encode the complete promise state
+        bytes memory stateData = abi.encode(
+            promiseState.status,
+            promiseState.value,
+            promiseState.creator
+        );
+        
+        // Send response back to the requesting chain
+        bytes memory responseMessage = abi.encodeCall(
+            this.handleRemotePromiseStateResponse,
+            (responsePromiseId, promiseId, stateData)
+        );
+        
+        messenger.sendMessage(responseChain, address(this), responseMessage);
+        
+        emit CrossChainQueryResponse(promiseId, responseChain, responsePromiseId);
+    }
+    
+    /// @notice Handle the response from a remote promise state query
+    /// @param queryPromiseId The local query promise to resolve
+    /// @param remotePromiseId The remote promise that was queried
+    /// @param stateData The encoded state data from the remote promise
+    function handleRemotePromiseStateResponse(
+        bytes32 queryPromiseId, 
+        bytes32 remotePromiseId, 
+        bytes memory stateData
+    ) external onlyPromiseLibrary {
+        
+        // Decode the remote promise state
+        (PromiseStatus remoteStatus, bytes memory remoteValue, address remoteCreator) = 
+            abi.decode(stateData, (PromiseStatus, bytes, address));
+        
+        // Create response data structure
+        RemotePromiseState memory remoteState = RemotePromiseState({
+            promiseId: remotePromiseId,
+            status: remoteStatus,
+            value: remoteValue,
+            creator: remoteCreator,
+            exists: remoteCreator != address(0)
+        });
+        
+        // Resolve the query promise with the remote state
+        _setPromiseState(queryPromiseId, PromiseStatus.RESOLVED, abi.encode(remoteState));
+        
+        emit CrossChainQueryResolved(queryPromiseId, remotePromiseId, remoteStatus);
     }
 } 

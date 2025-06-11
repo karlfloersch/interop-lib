@@ -1156,12 +1156,12 @@ contract CrossChainPromiseTest is Relayer, Test {
         return value;
     }
     
-    /// @notice Test True Cross-Chain Nested Promise Detection with Explicit Format
+    /// @notice Test Authenticated Cross-Chain Nested Promises with Explicit Format
     function test_explicit_cross_chain_nested_promises() public {
         vm.selectFork(forkIds[0]); // Start on Chain A
         
-        console.log("=== Testing Explicit Cross-Chain Nested Promises ===");
-        console.log("Using (bytes32 promiseId, bytes memory result) format across chains");
+        console.log("=== Testing Authenticated Cross-Chain Nested Promises ===");
+        console.log("Using (bytes32 promiseId, bytes memory result) format with cross-chain authentication");
         
         // Create initial promise on Chain A
         bytes32 initialPromise = promisesA.create();
@@ -1190,25 +1190,39 @@ contract CrossChainPromiseTest is Relayer, Test {
             promisesB.executeAllCallbacks(pendingNestedPromise);
             console.log("Nested promise resolved and callbacks executed");
             
-            // CRITICAL FIX: Since the cross-chain system doesn't handle explicit nested promises,
-            // manually call the final processor with the nested result to demonstrate the concept
-            console.log("Manually calling final processor with nested result");
-            vm.selectFork(forkIds[0]); // Switch to Chain A  
-            this.processNestedResult(pendingNestedValue);
-            console.log("Final processor called with nested value");
+            // AUTHENTICATED FIX: Use cross-chain promise state querying for verified coordination
+            console.log("Querying nested promise state for authenticated coordination");
+            vm.selectFork(forkIds[0]); // Switch to Chain A
+            uint256 chainBId = chainIdByForkId[forkIds[1]];
+            bytes32 stateQueryPromise = promisesA.queryRemotePromiseState(chainBId, pendingNestedPromise);
+            console.log("Sent cross-chain query for promise state verification");
+            
+            // Relay the query message to Chain B
+            relayAllMessages();
+            console.log("Query message relayed to Chain B");
+            
+            // Relay the response back to Chain A
+            relayAllMessages(); 
+            console.log("Query response relayed back to Chain A");
+            
+            // Now handle the authenticated response
+            vm.selectFork(forkIds[0]); // Ensure we're on Chain A
+            promisesA.then(stateQueryPromise, this.handleAuthenticatedNestedResult.selector);
+            promisesA.executeAllCallbacks(stateQueryPromise);
+            console.log("Authenticated nested result processed");
         }
         
         // Relay final result
         relayAllMessages();
         
-        console.log("=== Explicit Cross-Chain Results ===");
+        console.log("=== Authenticated Cross-Chain Results ===");
         console.log("Final result:", processNestedResultValue);
-        console.log("Expected: 300 (100 * 3 from nested promise)");
+        console.log("Expected: 300 (100 * 3 from authenticated nested promise)");
         
         if (processNestedResultValue == 300) {
-            console.log("SUCCESS: Explicit cross-chain nested promises working!");
-            console.log("Chain B properly created nested promise using explicit format");
-            assertEq(processNestedResultValue, 300, "Should get nested result (100 * 3)");
+            console.log("SUCCESS: Authenticated cross-chain nested promises working!");
+            console.log("Chain B properly created nested promise with authenticated cross-chain coordination");
+            assertEq(processNestedResultValue, 300, "Should get authenticated nested result (100 * 3)");
         } else {
             console.log("Partial success - debugging needed");
         }
@@ -1249,4 +1263,32 @@ contract CrossChainPromiseTest is Relayer, Test {
     // State for tracking pending nested promise
     bytes32 public pendingNestedPromise = bytes32(0);
     uint256 public pendingNestedValue = 0;
+    
+    /// @notice Handle authenticated nested promise result from cross-chain query
+    function handleAuthenticatedNestedResult(bytes memory queryResult) external returns (uint256) {
+        console.log("=== handleAuthenticatedNestedResult: Processing authenticated query response");
+        
+        // Decode the remote promise state
+        CrossChainPromise.RemotePromiseState memory remoteState = 
+            abi.decode(queryResult, (CrossChainPromise.RemotePromiseState));
+        
+        console.log("Remote promise ID:", vm.toString(remoteState.promiseId));
+        console.log("Remote promise exists:", remoteState.exists);
+        console.log("Remote promise status:", uint256(remoteState.status));
+        
+        // Verify the promise exists and is resolved
+        require(remoteState.exists, "Remote promise does not exist");
+        require(remoteState.status == LocalPromise.PromiseStatus.RESOLVED, "Remote promise not resolved");
+        require(remoteState.creator != address(0), "Invalid remote promise creator");
+        
+        // Decode the authenticated value
+        uint256 authenticatedValue = abi.decode(remoteState.value, (uint256));
+        console.log("Authenticated nested value:", authenticatedValue);
+        
+        // Now call the final processor with the authenticated value
+        this.processNestedResult(authenticatedValue);
+        console.log("Final processor called with authenticated nested value");
+        
+        return authenticatedValue;
+    }
 } 
