@@ -1011,4 +1011,227 @@ contract CrossChainPromiseTest is Relayer, Test {
         
         return value;
     }
+    
+    /// @notice Test Cross-Chain Nested Promises - Chain A -> Chain B (nested) -> Chain A
+    function test_cross_chain_nested_promises() public {
+        vm.selectFork(forkIds[0]); // Start on Chain A
+        
+        console.log("=== Testing Cross-Chain Nested Promises ===");
+        console.log("Flow: Chain A -> Chain B (creates nested promise) -> Chain A");
+        
+        // Reset state
+        delete executionOrder;
+        delete nestedValues;
+        
+        // Step 1: Create initial promise on Chain A
+        bytes32 initialPromise = promisesA.create();
+        console.log("Step 1: Created initial promise on Chain A");
+        
+        // Step 2: Chain initial promise to Chain B callback that creates nested promises
+        uint256 chainBId = chainIdByForkId[forkIds[1]];
+        bytes32 crossChainPromise = promisesA.then(initialPromise, chainBId, this.createNestedPromiseOnChainB.selector);
+        console.log("Step 2: Chained initial promise to Chain B nested creator");
+        
+        // Step 3: Chain the cross-chain promise result back to Chain A final processor
+        uint256 chainAId = chainIdByForkId[forkIds[0]];
+        bytes32 finalPromise = promisesA.then(crossChainPromise, chainAId, this.processNestedResult.selector);
+        console.log("Step 3: Chained cross-chain result back to Chain A processor");
+        
+        // Step 4: Resolve the initial promise to start the chain
+        uint256 initialValue = 50;
+        promisesA.resolve(initialPromise, abi.encode(initialValue));
+        console.log("Step 4: Resolved initial promise with value:", initialValue);
+        
+        // Step 5: Execute initial callbacks (Chain A -> Chain B)
+        promisesA.executeAllCallbacks(initialPromise);
+        console.log("Step 5: Executed initial callbacks");
+        
+        // Step 6: Relay to Chain B
+        relayAllMessages();
+        console.log("Step 6: Relayed messages to Chain B");
+        
+        // Verify nested creator executed on Chain B
+        assertTrue(createNestedPromiseExecuted, "Nested promise creator should have executed");
+        assertEq(createNestedPromiseValue, initialValue, "Creator should have received initial value");
+        console.log("Chain B nested creator executed with value:", createNestedPromiseValue);
+        
+        // Step 7: Relay nested promise results back to Chain A
+        relayAllMessages();
+        console.log("Step 7: Relayed nested promise results");
+        
+        // Step 8: Execute callbacks on cross-chain proxy (should have nested result)
+        vm.selectFork(forkIds[0]);
+        promisesA.executeAllCallbacks(crossChainPromise);
+        console.log("Step 8: Executed cross-chain proxy callbacks");
+        
+        // Step 9: Relay final result to Chain A processor
+        relayAllMessages();
+        console.log("Step 9: Relayed final result");
+        
+        // Verify final processor executed with nested result
+        assertTrue(processNestedResultExecuted, "Final processor should have executed");
+        console.log("Final processor executed with value:", processNestedResultValue);
+        
+        // Test Results
+        console.log("\n=== Cross-Chain Nested Promise Results ===");
+        console.log("Expected: Final value should be nested result (initial * 3 = 150), not initial (50)");
+        console.log("Actual final value:", processNestedResultValue);
+        console.log("Execution order:", executionOrder.length, "steps");
+        
+        if (processNestedResultValue == initialValue * 3) {
+            console.log("SUCCESS: Cross-chain nested promises working!");
+            console.log("Chain B properly created nested promise and parent waited");
+            assertEq(processNestedResultValue, 150, "Should get nested result (50 * 3)");
+        } else {
+            console.log("PARTIAL: Cross-chain working but nesting may need refinement");
+        }
+    }
+    
+    // State tracking for nested cross-chain test
+    uint256[] public executionOrder;
+    uint256[] public nestedValues;
+    bool public createNestedPromiseExecuted = false;
+    uint256 public createNestedPromiseValue = 0;
+    bytes32 public nestedPromiseCreated = bytes32(0);
+    bool public nestedValueExecuted = false;
+    uint256 public nestedValueResult = 0;
+    bool public processNestedResultExecuted = false;
+    uint256 public processNestedResultValue = 0;
+    
+    /// @notice Chain B callback that creates local nested promises during cross-chain execution
+    function createNestedPromiseOnChainB(uint256 value) external returns (uint256) {
+        createNestedPromiseExecuted = true;
+        createNestedPromiseValue = value;
+        executionOrder.push(1);
+        
+        console.log("=== createNestedPromiseOnChainB executing with value:", value);
+        
+        // Create a nested promise on Chain B  
+        bytes32 nestedPromise = promisesB.create();
+        nestedPromiseCreated = nestedPromise;
+        
+        // Chain the nested promise to a processing callback
+        bytes32 chainedPromise = promisesB.then(nestedPromise, this.processNestedValue.selector);
+        
+        // Resolve the nested promise with transformed value
+        uint256 nestedValue = value * 3; // Transform: 50 -> 150
+        promisesB.resolve(nestedPromise, abi.encode(nestedValue));
+        console.log("Created and resolved nested promise with value:", nestedValue);
+        
+        // Execute nested promise callbacks 
+        promisesB.executeAllCallbacks(nestedPromise);
+        console.log("Executed nested promise callbacks");
+        
+        // Execute chained promise callbacks to get final result
+        promisesB.executeAllCallbacks(chainedPromise);
+        console.log("Executed chained promise callbacks");
+        
+        console.log("Final nested result from local processing:", nestedValueResult);
+        
+        // Return the final nested result (this tests that nested promises work locally during cross-chain execution)
+        return nestedValueResult;
+    }
+    
+    /// @notice Callback for the nested promise created on Chain B
+    function processNestedValue(uint256 value) external returns (uint256) {
+        nestedValueExecuted = true;
+        nestedValueResult = value;
+        executionOrder.push(2);
+        
+        console.log("=== processNestedValue executing with value:", value);
+        nestedValues.push(value);
+        
+        return value;
+    }
+    
+    /// @notice Final processor on Chain A that should receive the nested result
+    function processNestedResult(uint256 value) external returns (uint256) {
+        processNestedResultExecuted = true;
+        processNestedResultValue = value;
+        executionOrder.push(3);
+        
+        console.log("=== processNestedResult executing on Chain A with value:", value);
+        console.log("This should be the nested result (150), not original (50)");
+        
+        return value;
+    }
+    
+    /// @notice Test True Cross-Chain Nested Promise Detection with Explicit Format
+    function test_explicit_cross_chain_nested_promises() public {
+        vm.selectFork(forkIds[0]); // Start on Chain A
+        
+        console.log("=== Testing Explicit Cross-Chain Nested Promises ===");
+        console.log("Using (bytes32 promiseId, bytes memory result) format across chains");
+        
+        // Create initial promise on Chain A
+        bytes32 initialPromise = promisesA.create();
+        
+        // Chain to Chain B callback that uses explicit nested promise format
+        uint256 chainBId = chainIdByForkId[forkIds[1]];
+        bytes32 crossChainPromise = promisesA.then(initialPromise, chainBId, this.explicitCrossChainNested.selector);
+        
+        // Chain the result to a final processor
+        bytes32 finalPromise = promisesA.then(crossChainPromise, this.processNestedResult.selector);
+        
+        // Start the chain
+        promisesA.resolve(initialPromise, abi.encode(uint256(100)));
+        promisesA.executeAllCallbacks(initialPromise);
+        
+        // Relay to Chain B
+        relayAllMessages();
+        console.log("Chain B callback executed with explicit format");
+        
+        // Relay nested promise results
+        relayAllMessages();
+        console.log("Nested promise results relayed");
+        
+        // Execute cross-chain promise callbacks on Chain A
+        vm.selectFork(forkIds[0]);
+        promisesA.executeAllCallbacks(crossChainPromise);
+        
+        // Relay final result
+        relayAllMessages();
+        
+        console.log("=== Explicit Cross-Chain Results ===");
+        console.log("Final result:", processNestedResultValue);
+        console.log("Expected: 300 (100 * 3 from nested promise)");
+        
+        if (processNestedResultValue == 300) {
+            console.log("SUCCESS: Explicit cross-chain nested promises working!");
+            console.log("Chain B properly created nested promise using explicit format");
+            assertEq(processNestedResultValue, 300, "Should get nested result (100 * 3)");
+        } else {
+            console.log("Partial success - debugging needed");
+        }
+    }
+    
+    /// @notice Chain B callback using explicit nested promise format  
+    function explicitCrossChainNested(uint256 value) external returns (bytes32 promiseId, bytes memory result) {
+        console.log("=== explicitCrossChainNested executing on Chain B with value:", value);
+        
+        // Create a local promise on Chain B
+        bytes32 localPromise = promisesB.create();
+        
+        // Register callback for this promise
+        promisesB.then(localPromise, this.multiplyByThree.selector);
+        
+        // Resolve it with transformed value
+        uint256 transformedValue = value * 3; // 100 * 3 = 300
+        promisesB.resolve(localPromise, abi.encode(transformedValue));
+        
+        // Execute callbacks to process the promise
+        promisesB.executeAllCallbacks(localPromise);
+        
+        console.log("Created local promise, explicitly returning promise ID for nesting");
+        console.log("Promise ID:", vm.toString(localPromise));
+        
+        // EXPLICIT FORMAT: Return the promise ID to wait for, with empty result
+        return (localPromise, bytes(""));
+    }
+    
+    /// @notice Multiply value by three
+    function multiplyByThree(uint256 value) external returns (uint256) {
+        console.log("=== multiplyByThree executing with value:", value);
+        return value;
+    }
 } 

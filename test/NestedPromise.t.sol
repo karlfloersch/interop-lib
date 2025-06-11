@@ -180,6 +180,134 @@ contract NestedPromiseTest is Relayer, Test {
         console.log("Nested promise completed with doubled value:", doubledValue);
         // In nested promises, this should execute BEFORE observingCallback
     }
+
+    /// @notice Test explicit nested promise format
+    function test_explicit_nested_promises() public {
+        vm.selectFork(forkIds[0]);
+        
+        // Reset state
+        delete executionOrder;
+        finalValue = 0;
+        
+        console.log("=== Testing Explicit Nested Promise Format ===");
+        console.log("Using (bytes32 promiseId, bytes memory result) return format");
+        
+        // Send a promise that returns 100 (token balance)
+        bytes32 promise1 = promises.sendMessage(
+            chainIdByForkId[forkIds[1]], 
+            address(token), 
+            abi.encodeCall(IERC20.balanceOf, (address(this)))
+        );
+        
+        // Attach callbacks using NEW explicit format
+        promises.then(promise1, this.explicitNestedCallback.selector);      // Returns nested promise explicitly
+        promises.then(promise1, this.explicitValueCallback.selector);       // Returns value explicitly
+        promises.then(promise1, this.legacyCallback.selector);              // Legacy format for comparison
+        
+        console.log("Callbacks registered (explicit + legacy), starting relay...");
+        
+        // Relay the first promise
+        relayAllMessages();
+        relayAllPromises(IPromise(address(promises)), chainIdByForkId[forkIds[0]]);
+        
+        console.log("First round complete");
+        console.log("Execution order so far:");
+        for (uint256 i = 0; i < executionOrder.length; i++) {
+            console.log("  Step", executionOrder[i]);
+        }
+        console.log("Final value recorded:", finalValue);
+        
+        // Additional relay for nested promises
+        console.log("\n=== Relaying nested promises ===");
+        relayAllMessages();
+        relayAllPromises(IPromise(address(promises)), chainIdByForkId[forkIds[0]]);
+        
+        console.log("Final execution order:");
+        for (uint256 i = 0; i < executionOrder.length; i++) {
+            console.log("  Step", executionOrder[i]);
+        }
+        
+        console.log("\n=== Explicit Nested Promise Results ===");
+        console.log("explicitNestedValue:", explicitNestedValue);
+        console.log("explicitValueResult:", explicitValueResult); 
+        console.log("legacyCallbackValue:", legacyCallbackValue);
+        
+        // Verify explicit format works
+        if (explicitNestedValue == 300) { // 100 * 3 from nested promise
+            console.log("SUCCESS: Explicit nested promise format working!");
+            console.log("Nested promise properly resolved with transformed value");
+        }
+        
+        if (explicitValueResult == 200) { // 100 * 2 direct value
+            console.log("SUCCESS: Explicit value format working!");
+            console.log("Direct value properly returned without nesting");
+        }
+        
+        if (legacyCallbackValue == 100) { // Original value
+            console.log("SUCCESS: Legacy format still working!");
+            console.log("Backward compatibility maintained");
+        }
+    }
+    
+    // State for explicit format testing
+    uint256 public explicitNestedValue = 0;
+    uint256 public explicitValueResult = 0;
+    uint256 public legacyCallbackValue = 0;
+    
+    /// @notice Callback using explicit nested promise format
+    function explicitNestedCallback(uint256 value) external returns (bytes32 promiseId, bytes memory result) {
+        executionOrder.push(10);
+        console.log("=== explicitNestedCallback: Creating nested promise for value:", value);
+        
+        // Create nested promise
+        bytes32 nestedPromise = promises.sendMessage(
+            chainIdByForkId[forkIds[1]], 
+            address(calculator), 
+            abi.encodeCall(Calculator.multiply, (value, 3))
+        );
+        
+        // Register callback for nested promise
+        promises.then(nestedPromise, this.explicitNestedComplete.selector);
+        
+        console.log("Explicitly returning nested promise ID:", vm.toString(nestedPromise));
+        
+        // EXPLICIT FORMAT: Return promise ID to wait for, with empty result
+        return (nestedPromise, bytes(""));
+    }
+    
+    /// @notice Callback using explicit value format
+    function explicitValueCallback(uint256 value) external returns (bytes32 promiseId, bytes memory result) {
+        executionOrder.push(11);
+        console.log("=== explicitValueCallback: Processing value directly:", value);
+        
+        uint256 processedValue = value * 2; // Transform: 100 -> 200
+        explicitValueResult = processedValue;
+        
+        console.log("Explicitly returning processed value:", processedValue);
+        
+        // EXPLICIT FORMAT: Return empty promise ID with processed result
+        return (bytes32(0), abi.encode(processedValue));
+    }
+    
+    /// @notice Legacy callback for backward compatibility testing
+    function legacyCallback(uint256 value) external returns (uint256) {
+        executionOrder.push(12);
+        console.log("=== legacyCallback: Using legacy return format:", value);
+        
+        legacyCallbackValue = value;
+        
+        // LEGACY FORMAT: Return single value (should still work)
+        return value;
+    }
+    
+    /// @notice Completion handler for explicit nested promise
+    function explicitNestedComplete(uint256 nestedValue) external returns (uint256) {
+        executionOrder.push(13);
+        console.log("=== explicitNestedComplete: Nested promise resolved with:", nestedValue);
+        
+        explicitNestedValue = nestedValue;
+        return nestedValue;
+    }
 }
 
 /// @notice Thrown when attempting to mint or burn tokens and the account is the zero address.

@@ -146,16 +146,33 @@ contract LocalPromise {
                 );
                 
                 if (success && callback.nextPromiseId != bytes32(0)) {
-                    // Check if callback returned a promise ID (nested promise support)
-                    bytes32 nestedPromiseId = _tryDecodeAsPromiseId(returnData);
+                    // Try to decode as explicit nested promise format: (bytes32 promiseId, bytes memory result)
+                    (bytes32 explicitPromiseId, bytes memory explicitResult) = _tryDecodeAsExplicitReturn(returnData);
                     
-                    if (nestedPromiseId != bytes32(0) && _isValidPendingPromise(nestedPromiseId)) {
-                        // TRUE NESTED PROMISES: Wait for the nested promise to resolve
-                        _setupNestedPromiseChain(nestedPromiseId, callback.nextPromiseId);
-                        emit NestedPromiseDetected(callback.nextPromiseId, nestedPromiseId);
+                    if (explicitPromiseId != bytes32(0)) {
+                        // EXPLICIT NESTED PROMISE: Wait for the specified promise
+                        if (_isValidPendingPromise(explicitPromiseId)) {
+                            _setupNestedPromiseChain(explicitPromiseId, callback.nextPromiseId);
+                            emit NestedPromiseDetected(callback.nextPromiseId, explicitPromiseId);
+                        } else {
+                            // Invalid promise ID - resolve with error
+                            _setPromiseState(callback.nextPromiseId, PromiseStatus.REJECTED, abi.encode("Invalid nested promise ID"));
+                        }
+                    } else if (explicitResult.length > 0) {
+                        // EXPLICIT RESULT: Use the provided result value
+                        _setPromiseState(callback.nextPromiseId, PromiseStatus.RESOLVED, explicitResult);
                     } else {
-                        // SERIAL PROMISES: Resolve immediately with callback return value
-                        _setPromiseState(callback.nextPromiseId, PromiseStatus.RESOLVED, returnData);
+                        // FALLBACK: Try legacy heuristic detection for backward compatibility
+                        bytes32 legacyPromiseId = _tryDecodeAsPromiseId(returnData);
+                        
+                        if (legacyPromiseId != bytes32(0) && _isValidPendingPromise(legacyPromiseId)) {
+                            // LEGACY NESTED PROMISES: Wait for the nested promise to resolve
+                            _setupNestedPromiseChain(legacyPromiseId, callback.nextPromiseId);
+                            emit NestedPromiseDetected(callback.nextPromiseId, legacyPromiseId);
+                        } else {
+                            // LEGACY SERIAL PROMISES: Resolve immediately with callback return value
+                            _setPromiseState(callback.nextPromiseId, PromiseStatus.RESOLVED, returnData);
+                        }
                     }
                     nextPromiseId = callback.nextPromiseId;
                 } else if (!success) {
@@ -168,6 +185,30 @@ contract LocalPromise {
                 }
             }
         }
+    }
+    
+    /// @notice Try to decode return data as explicit nested promise format
+    /// @param returnData The data returned from callback
+    /// @return promiseId The promise ID if explicit format, bytes32(0) otherwise
+    /// @return result The result value if explicit format, empty bytes otherwise
+    function _tryDecodeAsExplicitReturn(bytes memory returnData) internal view returns (bytes32 promiseId, bytes memory result) {
+        // Check if return data could be (bytes32, bytes) format
+        if (returnData.length >= 64) { // At least 32 bytes for promiseId + 32 bytes for bytes offset
+            try this.decodeExplicitReturn(returnData) returns (bytes32 decodedPromiseId, bytes memory decodedResult) {
+                return (decodedPromiseId, decodedResult);
+            } catch {
+                // Not explicit format, return zeros
+                return (bytes32(0), bytes(""));
+            }
+        }
+        // Too short to be explicit format
+        return (bytes32(0), bytes(""));
+    }
+    
+    /// @notice Helper function to decode explicit return format
+    /// @dev External function to enable try/catch pattern
+    function decodeExplicitReturn(bytes memory returnData) external pure returns (bytes32 promiseId, bytes memory result) {
+        return abi.decode(returnData, (bytes32, bytes));
     }
     
     /// @notice Try to decode return data as a promise ID
