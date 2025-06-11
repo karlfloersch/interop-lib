@@ -33,6 +33,15 @@ contract Promise is TransientReentrancyAware {
     ///         sent directly to the L2ToL2CrossDomainMessenger which does not emit the return value (yet)
     mapping(bytes32 => bool) private sentMessages;
 
+    /// @notice Tracks nested promise relationships - parent hash -> nested hash
+    mapping(bytes32 => bytes32) public nestedPromises;
+    
+    /// @notice Tracks callbacks waiting for nested promises - nested hash -> parent hash
+    mapping(bytes32 => bytes32) public pendingNestedCallbacks;
+    
+    /// @notice Tracks the remaining callbacks for a parent after nested promise is detected
+    mapping(bytes32 => Callback[]) public deferredCallbacks;
+
     /// @notice an event emitted when a callback is registered
     event CallbackRegistered(bytes32 messageHash);
 
@@ -41,6 +50,9 @@ contract Promise is TransientReentrancyAware {
 
     /// @notice an event emitted when a message is relayed
     event RelayedMessage(bytes32 messageHash, bytes returnData);
+    
+    /// @notice an event emitted when a nested promise is detected
+    event NestedPromiseDetected(bytes32 indexed parentHash, bytes32 indexed nestedHash);
 
     /// @dev Modifier to restrict a function to only be a cross domain callback into this contract
     modifier onlyCrossDomainCallback() {
@@ -104,19 +116,14 @@ contract Promise is TransientReentrancyAware {
         currentRelayIdentifier = _id;
 
         (bytes32 msgHash, bytes memory returnData) = abi.decode(_payload[32:], (bytes32, bytes));
-        for (uint256 i = 0; i < callbacks[msgHash].length; i++) {
-            Callback memory callback = callbacks[msgHash][i];
-            if (callback.context.length > 0) {
-                currentContext = callback.context;
-            }
-
-            (bool completed,) = callback.target.call(abi.encodePacked(callback.selector, returnData));
-            require(completed, "Promise: callback call failed");
-
-            if (callback.context.length > 0) {
-                delete currentContext;
-            }
+        
+        // Check if this is resolving a nested promise
+        if (pendingNestedCallbacks[msgHash] != bytes32(0)) {
+            _handleNestedPromiseResolution(msgHash, returnData);
+            return;
         }
+        
+        _executeCallbacksWithNesting(msgHash, returnData);
 
         emit CallbacksCompleted(msgHash);
 
@@ -124,6 +131,122 @@ contract Promise is TransientReentrancyAware {
         delete callbacks[msgHash];
         delete sentMessages[msgHash];
         delete currentRelayIdentifier;
+    }
+    
+    /// @notice Execute callbacks with nested promise detection
+    /// @param msgHash The message hash being resolved
+    /// @param returnData The return data from the message
+    function _executeCallbacksWithNesting(bytes32 msgHash, bytes memory returnData) internal {
+        Callback[] memory callbackList = callbacks[msgHash];
+        
+        for (uint256 i = 0; i < callbackList.length; i++) {
+            Callback memory callback = callbackList[i];
+            if (callback.context.length > 0) {
+                currentContext = callback.context;
+            }
+
+            (bool completed, bytes memory callbackReturnData) = callback.target.call(abi.encodePacked(callback.selector, returnData));
+            require(completed, "Promise: callback call failed");
+
+            // Check if callback returned a nested promise (message hash)
+            if (callbackReturnData.length > 0) {
+                bytes32 nestedHash = _tryDecodeAsMessageHash(callbackReturnData);
+                
+                if (nestedHash != bytes32(0) && _isValidPendingMessage(nestedHash)) {
+                    // NESTED PROMISE DETECTED!
+                    emit NestedPromiseDetected(msgHash, nestedHash);
+                    
+                    // Store the nested relationship
+                    nestedPromises[msgHash] = nestedHash;
+                    pendingNestedCallbacks[nestedHash] = msgHash;
+                    
+                    // Store remaining callbacks to execute after nested promise resolves
+                    _storeDeferredCallbacks(msgHash, callbackList, i + 1);
+                    
+                    // Stop processing callbacks - wait for nested promise
+                    if (callback.context.length > 0) {
+                        delete currentContext;
+                    }
+                    return;
+                }
+            }
+
+            if (callback.context.length > 0) {
+                delete currentContext;
+            }
+        }
+    }
+    
+    /// @notice Handle resolution of a nested promise
+    /// @param nestedHash The nested promise that just resolved
+    /// @param nestedReturnData The return data from the nested promise
+    function _handleNestedPromiseResolution(bytes32 nestedHash, bytes memory nestedReturnData) internal {
+        bytes32 parentHash = pendingNestedCallbacks[nestedHash];
+        require(parentHash != bytes32(0), "Promise: no parent for nested promise");
+        
+        // Execute the deferred callbacks with the nested promise result
+        Callback[] memory deferredCallbackList = deferredCallbacks[parentHash];
+        
+        for (uint256 i = 0; i < deferredCallbackList.length; i++) {
+            Callback memory callback = deferredCallbackList[i];
+            if (callback.context.length > 0) {
+                currentContext = callback.context;
+            }
+
+            (bool completed,) = callback.target.call(abi.encodePacked(callback.selector, nestedReturnData));
+            require(completed, "Promise: deferred callback call failed");
+
+            if (callback.context.length > 0) {
+                delete currentContext;
+            }
+        }
+        
+        // Cleanup nested promise tracking
+        delete nestedPromises[parentHash];
+        delete pendingNestedCallbacks[nestedHash];
+        delete deferredCallbacks[parentHash];
+        
+        emit CallbacksCompleted(parentHash);
+        
+        // Cleanup parent message state
+        delete callbacks[parentHash];
+        delete sentMessages[parentHash];
+    }
+    
+    /// @notice Try to decode return data as a message hash (32 bytes)
+    /// @param returnData The data returned from callback
+    /// @return messageHash The message hash if valid, bytes32(0) otherwise
+    function _tryDecodeAsMessageHash(bytes memory returnData) internal pure returns (bytes32 messageHash) {
+        // Message hashes are exactly 32 bytes
+        if (returnData.length == 32) {
+            messageHash = abi.decode(returnData, (bytes32));
+        }
+        // Return bytes32(0) if not 32 bytes or decode fails
+    }
+    
+    /// @notice Check if a message hash is valid and still pending
+    /// @param messageHash The message hash to check  
+    /// @return valid True if message was sent by this contract and still pending
+    function _isValidPendingMessage(bytes32 messageHash) internal view returns (bool valid) {
+        // Check if this message was sent by this contract and hasn't been resolved yet
+        return sentMessages[messageHash] && callbacks[messageHash].length > 0;
+    }
+    
+    /// @notice Store callbacks that should execute after nested promise resolves
+    /// @param parentHash The parent message hash
+    /// @param allCallbacks All callbacks for the parent
+    /// @param startIndex Index to start storing from (callbacks after the nested one)
+    function _storeDeferredCallbacks(bytes32 parentHash, Callback[] memory allCallbacks, uint256 startIndex) internal {
+        uint256 deferredCount = allCallbacks.length - startIndex;
+        if (deferredCount == 0) return;
+        
+        // Clear existing deferred callbacks
+        delete deferredCallbacks[parentHash];
+        
+        // Store the callbacks that should execute after nested promise resolves
+        for (uint256 i = 0; i < deferredCount; i++) {
+            deferredCallbacks[parentHash].push(allCallbacks[startIndex + i]);
+        }
     }
 
     /// @notice get the context that is being propagated with the promise

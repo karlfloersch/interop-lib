@@ -61,6 +61,9 @@ contract LocalPromise {
     /// @notice Emitted when Promise.all is rejected
     event AllPromiseRejected(bytes32 indexed allPromiseId, bytes reason);
     
+    /// @notice Emitted when a nested promise is detected
+    event NestedPromiseDetected(bytes32 indexed parentPromiseId, bytes32 indexed nestedPromiseId);
+    
     /// @notice Create a new pending promise
     /// @return promiseId The unique identifier for this promise
     function create() external returns (bytes32) {
@@ -143,8 +146,17 @@ contract LocalPromise {
                 );
                 
                 if (success && callback.nextPromiseId != bytes32(0)) {
-                    // Resolve next promise with callback return value (no recursion)
-                    _setPromiseState(callback.nextPromiseId, PromiseStatus.RESOLVED, returnData);
+                    // Check if callback returned a promise ID (nested promise support)
+                    bytes32 nestedPromiseId = _tryDecodeAsPromiseId(returnData);
+                    
+                    if (nestedPromiseId != bytes32(0) && _isValidPendingPromise(nestedPromiseId)) {
+                        // TRUE NESTED PROMISES: Wait for the nested promise to resolve
+                        _setupNestedPromiseChain(nestedPromiseId, callback.nextPromiseId);
+                        emit NestedPromiseDetected(callback.nextPromiseId, nestedPromiseId);
+                    } else {
+                        // SERIAL PROMISES: Resolve immediately with callback return value
+                        _setPromiseState(callback.nextPromiseId, PromiseStatus.RESOLVED, returnData);
+                    }
                     nextPromiseId = callback.nextPromiseId;
                 } else if (!success) {
                     // Handle callback failure
@@ -156,6 +168,57 @@ contract LocalPromise {
                 }
             }
         }
+    }
+    
+    /// @notice Try to decode return data as a promise ID
+    /// @param returnData The data returned from callback
+    /// @return promiseId The promise ID if valid, bytes32(0) otherwise
+    function _tryDecodeAsPromiseId(bytes memory returnData) internal pure returns (bytes32 promiseId) {
+        // Promise IDs are exactly 32 bytes
+        if (returnData.length == 32) {
+            promiseId = abi.decode(returnData, (bytes32));
+        }
+        // Return bytes32(0) if not 32 bytes or decode fails
+    }
+    
+    /// @notice Check if a promise ID exists and is pending
+    /// @param promiseId The promise ID to check
+    /// @return valid True if promise exists and is pending
+    function _isValidPendingPromise(bytes32 promiseId) internal view returns (bool valid) {
+        PromiseState memory promiseState = promises[promiseId];
+        return promiseState.creator != address(0) && promiseState.status == PromiseStatus.PENDING;
+    }
+    
+    /// @notice Set up nested promise chain - when nested resolves, resolve parent
+    /// @param nestedPromiseId The nested promise to wait for
+    /// @param parentPromiseId The parent promise to resolve when nested completes
+    function _setupNestedPromiseChain(bytes32 nestedPromiseId, bytes32 parentPromiseId) internal {
+        // Register internal callback on nested promise to resolve parent
+        callbacks[nestedPromiseId].push(Callback({
+            target: address(this),
+            selector: this._resolveParentFromNested.selector,
+            errorSelector: this._rejectParentFromNested.selector,
+            nextPromiseId: parentPromiseId
+        }));
+        
+        emit CallbackRegistered(nestedPromiseId, address(this), this._resolveParentFromNested.selector, this._rejectParentFromNested.selector);
+    }
+    
+    /// @notice Internal callback to resolve parent promise when nested promise resolves
+    /// @param nestedValue The value from the nested promise
+    /// @return nestedValue Pass through the nested value
+    function _resolveParentFromNested(bytes memory nestedValue) external returns (bytes memory) {
+        require(msg.sender == address(this), "LocalPromise: only self can call");
+        // The actual parent promise resolution happens in executeCallback via nextPromiseId
+        return nestedValue;
+    }
+    
+    /// @notice Internal callback to reject parent promise when nested promise rejects  
+    /// @param nestedReason The rejection reason from the nested promise
+    function _rejectParentFromNested(bytes memory nestedReason) external {
+        require(msg.sender == address(this), "LocalPromise: only self can call");
+        // The actual parent promise rejection happens in executeCallback via nextPromiseId
+        // This callback just handles the error propagation
     }
     
     /// @notice Execute all callbacks for a resolved/rejected promise
