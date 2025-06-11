@@ -1181,6 +1181,16 @@ contract CrossChainPromiseTest is Relayer, Test {
         relayAllMessages();
         console.log("Chain B callback executed with explicit format");
         
+        // CRITICAL: Now resolve the pending nested promise to trigger forwarding
+        console.log("Resolving pending nested promise...");
+        vm.selectFork(forkIds[1]); // Switch to Chain B
+        if (pendingNestedPromise != bytes32(0)) {
+            console.log("Resolving nested promise with value:", pendingNestedValue);
+            promisesB.resolve(pendingNestedPromise, abi.encode(pendingNestedValue));
+            promisesB.executeAllCallbacks(pendingNestedPromise);
+            console.log("Nested promise resolved and callbacks executed");
+        }
+        
         // Relay nested promise results
         relayAllMessages();
         console.log("Nested promise results relayed");
@@ -1215,15 +1225,17 @@ contract CrossChainPromiseTest is Relayer, Test {
         // Register callback for this promise
         promisesB.then(localPromise, this.multiplyByThree.selector);
         
-        // Resolve it with transformed value
-        uint256 transformedValue = value * 3; // 100 * 3 = 300
-        promisesB.resolve(localPromise, abi.encode(transformedValue));
-        
-        // Execute callbacks to process the promise
-        promisesB.executeAllCallbacks(localPromise);
+        // CRITICAL FIX: Don't resolve the promise yet! 
+        // The cross-chain system needs to register its forwarding callback first
+        // We'll resolve it later in the test flow
         
         console.log("Created local promise, explicitly returning promise ID for nesting");
         console.log("Promise ID:", vm.toString(localPromise));
+        console.log("Promise will be resolved later to allow cross-chain forwarding setup");
+        
+        // Store the promise details for later resolution
+        pendingNestedPromise = localPromise;
+        pendingNestedValue = value * 3; // 100 * 3 = 300
         
         // EXPLICIT FORMAT: Return the promise ID to wait for, with empty result
         return (localPromise, bytes(""));
@@ -1234,4 +1246,8 @@ contract CrossChainPromiseTest is Relayer, Test {
         console.log("=== multiplyByThree executing with value:", value);
         return value;
     }
+    
+    // State for tracking pending nested promise
+    bytes32 public pendingNestedPromise = bytes32(0);
+    uint256 public pendingNestedValue = 0;
 } 
