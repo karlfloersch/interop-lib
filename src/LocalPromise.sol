@@ -113,6 +113,14 @@ contract LocalPromise {
     /// @param callbackIndex The index of the callback to execute  
     /// @return nextPromiseId The next promise ID if chaining (bytes32(0) if none)
     function executeCallback(bytes32 promiseId, uint256 callbackIndex) external virtual returns (bytes32 nextPromiseId) {
+        return _executeCallbackCore(promiseId, callbackIndex);
+    }
+    
+    /// @notice Internal core callback execution logic - can be reused by child classes
+    /// @param promiseId The promise whose callback to execute
+    /// @param callbackIndex The index of the callback to execute  
+    /// @return nextPromiseId The next promise ID if chaining (bytes32(0) if none)
+    function _executeCallbackCore(bytes32 promiseId, uint256 callbackIndex) internal returns (bytes32 nextPromiseId) {
         PromiseState memory promiseState = promises[promiseId];
         require(promiseState.status != PromiseStatus.PENDING, "LocalPromise: promise not yet resolved");
         

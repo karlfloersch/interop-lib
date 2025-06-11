@@ -239,8 +239,6 @@ contract CrossChainPromise is LocalPromise {
         });
     }
     
-
-    
     /// @notice Execute remote callback and resolve promise (called via cross-chain message)
     function executeRemoteCallback(
         bytes32 remotePromiseId,
@@ -315,62 +313,16 @@ contract CrossChainPromise is LocalPromise {
     
     /// @notice Override executeCallback to handle cross-chain forwarding
     function executeCallback(bytes32 promiseId, uint256 callbackIndex) external override returns (bytes32 nextPromiseId) {
-        // First execute the regular callback using LocalPromise logic
-        PromiseState memory promiseState = promises[promiseId];
-        require(promiseState.status != PromiseStatus.PENDING, "LocalPromise: promise not yet resolved");
+        // ✅ REUSE parent core logic - maximum code reuse!
+        nextPromiseId = _executeCallbackCore(promiseId, callbackIndex);
         
-        Callback[] storage callbackList = callbacks[promiseId];
-        require(callbackIndex < callbackList.length, "LocalPromise: callback index out of bounds");
-        
-        Callback memory callback = callbackList[callbackIndex];
-        bool isError = promiseState.status == PromiseStatus.REJECTED;
-        
-        if (isError) {
-            // Execute error callback if available
-            if (callback.errorSelector != bytes4(0)) {
-                callback.target.call(abi.encodePacked(callback.errorSelector, promiseState.value));
-            }
-        } else {
-            // Execute success callback and handle chaining
-            if (callback.selector != bytes4(0)) {
-                (bool success, bytes memory returnData) = _callCallbackWithProperEncoding(
-                    callback.target, callback.selector, promiseState.value
-                );
-                
-                if (success && callback.nextPromiseId != bytes32(0)) {
-                    // Resolve next promise with callback return value (no recursion)
-                    _setPromiseState(callback.nextPromiseId, PromiseStatus.RESOLVED, returnData);
-                    nextPromiseId = callback.nextPromiseId;
-                } else if (!success) {
-                    // Handle callback failure
-                    if (callback.errorSelector != bytes4(0)) {
-                        callback.target.call(
-                            abi.encodePacked(callback.errorSelector, abi.encode("Callback execution failed"))
-                        );
-                    }
-                }
-            }
-        }
-        
-        // Check if this promise has cross-chain forwarding
-        CrossChainForwardData storage forwardData = crossChainForwarding[promiseId];
-        if (forwardData.isActive && promiseState.status == PromiseStatus.RESOLVED) {
-            // Send the value to the remote chain
-            bytes memory executeMessage = abi.encodeCall(
-                this.executeRemoteCallback,
-                (forwardData.remotePromiseId, promiseState.value)
-            );
-            
-            messenger.sendMessage(forwardData.destinationChain, address(this), executeMessage);
-            
-            // Mark forwarding as completed
-            forwardData.isActive = false;
-        }
+        // ✅ ONLY add our cross-chain specific logic
+        _handleCrossChainForwarding(promiseId);
     }
     
     /// @notice Override executeAllCallbacks to handle cross-chain forwarding
     function executeAllCallbacks(bytes32 promiseId) external override returns (bytes32[] memory nextPromiseIds) {
-        // Execute all regular callbacks using LocalPromise logic
+        // ✅ REUSE parent implementation logic
         Callback[] storage callbackList = callbacks[promiseId];
         nextPromiseIds = new bytes32[](callbackList.length);
         uint256 nextCount = 0;
@@ -388,7 +340,13 @@ contract CrossChainPromise is LocalPromise {
             mstore(nextPromiseIds, nextCount)
         }
         
-        // Handle cross-chain forwarding even if there are no regular callbacks
+        // ✅ ONLY add our cross-chain specific logic
+        _handleCrossChainForwarding(promiseId);
+    }
+    
+    /// @notice Internal helper to handle cross-chain forwarding after callbacks execute
+    /// @param promiseId The promise that was executed
+    function _handleCrossChainForwarding(bytes32 promiseId) internal {
         CrossChainForwardData storage forwardData = crossChainForwarding[promiseId];
         if (forwardData.isActive) {
             PromiseState memory promiseState = promises[promiseId];
