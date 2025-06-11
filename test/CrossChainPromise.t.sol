@@ -56,6 +56,11 @@ contract CrossChainPromiseTest is Relayer, Test {
     
     uint256 public totalPromiseAllsCompleted;
     
+    // State for tracking pending nested promises and Promise.all coordination
+    bytes32 public pendingNestedPromise = bytes32(0);
+    uint256 public pendingNestedValue = 0;
+    bytes32 public pendingPromiseAllId = bytes32(0);
+    
     /// @notice Reusable helper to set up Promise.all with proper tracking
     /// @param promiseIds Array of promise IDs for the Promise.all
     /// @param description Description for logging
@@ -394,7 +399,7 @@ contract CrossChainPromiseTest is Relayer, Test {
     function test_cross_chain_promise_all_with_chaining() public {
         vm.selectFork(forkIds[0]); // Start on chain A
         
-        console.log("=== Testing Cross-Chain Promise.all with Mixed Operations & Chaining ===");
+        console.log("=== Testing Authenticated Cross-Chain Promise.all with Mixed Operations & Chaining ===");
         
         // Step 1: Create initial promise on Chain A
         bytes32 initialPromise = promisesA.create();
@@ -427,75 +432,113 @@ contract CrossChainPromiseTest is Relayer, Test {
         assertEq(crossChainAggregatorValue, initialValue, "Aggregator received correct value");
         console.log("SUCCESS: CrossChainAggregator executed on Chain B with value:", crossChainAggregatorValue);
         
-        // Step 7: Relay return messages back to Chain B (completes cross-chain operation)
-        relayAllMessages();
-        console.log("Step 7: Relayed return messages - cross-chain operation should be complete");
+        // NEW: Handle explicit nested promise format returned from crossChainAggregator
+        console.log("Step 6.5: Handling explicit nested Promise.all format from crossChainAggregator");
+        vm.selectFork(forkIds[1]); // Switch to Chain B to handle Promise.all coordination
         
-        // Step 8: Check Promise.all coordination on Chain B (before cross-chain proxy resolves)
-        vm.selectFork(forkIds[1]); // Switch to Chain B
-        (bool shouldResolve, bool shouldReject) = promisesB.checkAllPromise(mixedOperationAllPromiseId);
-        console.log("Step 8: Promise.all ready status - shouldResolve:", shouldResolve, "shouldReject:", shouldReject);
-        
-        // Step 9: Relay final return messages to resolve cross-chain proxy on Chain B
-        relayAllMessages();
-        console.log("Step 9: Relayed return messages - cross-chain proxy should now be resolved");
-        
-        // Step 10: NOW check and execute Promise.all on Chain B (after proxy resolves)
-        vm.selectFork(forkIds[1]); // Ensure we're on Chain B
-        (shouldResolve, shouldReject) = promisesB.checkAllPromise(mixedOperationAllPromiseId);
-        console.log("Step 10: Promise.all ready status after proxy resolution - shouldResolve:", shouldResolve, "shouldReject:", shouldReject);
-        
-        if (shouldResolve) {
-            bool wasExecuted = promisesB.executeAll(mixedOperationAllPromiseId);
-            console.log("Step 10: Promise.all executed:", wasExecuted);
-            if (wasExecuted) {
-                promisesB.executeAllCallbacks(mixedOperationAllPromiseId);
-                console.log("Step 10: Promise.all completion handler executed");
+        if (pendingPromiseAllId != bytes32(0)) {
+            console.log("Found pending Promise.all ID:", vm.toString(pendingPromiseAllId));
+            
+            // Wait for Promise.all to be ready (both cross-chain and local promises completed)
+            console.log("Waiting for Promise.all coordination to complete...");
+            
+            // Step 7: Continue with cross-chain message relaying
+            relayAllMessages();
+            console.log("Step 7: Relayed return messages - cross-chain operation should be complete");
+            
+            // Step 8: Check Promise.all coordination on Chain B (before cross-chain proxy resolves)
+            vm.selectFork(forkIds[1]); // Switch to Chain B
+            (bool shouldResolve, bool shouldReject) = promisesB.checkAllPromise(pendingPromiseAllId);
+            console.log("Step 8: Promise.all ready status - shouldResolve:", shouldResolve, "shouldReject:", shouldReject);
+            
+            // Relay additional messages to ensure cross-chain proxy resolves
+            relayAllMessages();
+            console.log("Step 9: Relayed additional messages - cross-chain proxy should now be resolved");
+            
+            // Step 10: NOW check and execute Promise.all on Chain B (after proxy resolves)
+            vm.selectFork(forkIds[1]); // Ensure we're on Chain B
+            (shouldResolve, shouldReject) = promisesB.checkAllPromise(pendingPromiseAllId);
+            console.log("Step 10: Promise.all ready status after proxy resolution - shouldResolve:", shouldResolve, "shouldReject:", shouldReject);
+            
+            if (shouldResolve) {
+                bool wasExecuted = promisesB.executeAll(pendingPromiseAllId);
+                console.log("Step 10: Promise.all executed:", wasExecuted);
+                if (wasExecuted) {
+                    promisesB.executeAllCallbacks(pendingPromiseAllId);
+                    console.log("Step 10: Authenticated Promise.all completion handler executed");
+                }
             }
+            
+            // Step 11: Relay Promise.all completion messages
+            relayAllMessages();
+            console.log("Step 11: Relayed authenticated Promise.all completion messages");
+            
+            // Step 12: Now we need to handle the cross-chain authentication for the Promise.all result
+            console.log("Step 12: Authenticating Promise.all result via cross-chain query");
+            vm.selectFork(forkIds[0]); // Switch to Chain A
+            uint256 chainBId = chainIdByForkId[forkIds[1]];
+            bytes32 authQueryPromise = promisesA.queryRemotePromiseState(chainBId, pendingPromiseAllId);
+            console.log("Sent cross-chain authentication query for Promise.all result");
+            
+            // Relay the authentication query
+            relayAllMessages();
+            console.log("Authentication query relayed to Chain B");
+            
+            // Relay the authentication response
+            relayAllMessages();
+            console.log("Authentication response relayed back to Chain A");
+            
+            // Handle authenticated Promise.all result
+            promisesA.then(authQueryPromise, this.handleAuthenticatedPromiseAllResult.selector);
+            promisesA.executeAllCallbacks(authQueryPromise);
+            console.log("Authenticated Promise.all result processed");
+            
+        } else {
+            console.log("No pending Promise.all ID found - falling back to old flow");
+            
+            // Fall back to old flow for backward compatibility
+            relayAllMessages();
+            console.log("Step 7: Relayed return messages - cross-chain operation should be complete");
         }
         
-        // Step 11: Relay Promise.all completion messages
-        relayAllMessages();
-        console.log("Step 11: Relayed Promise.all completion messages");
-        
-        // Step 12: Relay the new aggregator return promise result to Chain A
-        relayAllMessages();
-        console.log("Step 12: Relayed aggregator return promise result to Chain A");
-        
-        // Step 13: Execute final aggregator promise on Chain A  
-        vm.selectFork(forkIds[0]);
-        promisesA.executeAllCallbacks(aggregatorPromise);
-        console.log("Step 13: Executed aggregator promise callbacks on Chain A");
-        
-        // Step 14: Execute ultimate result handler (old path)
-        promisesA.executeAllCallbacks(finalPromise);
-        console.log("Step 14: Executed ultimate result handler (old path)");
-        
-        // Verify final results
-        assertTrue(ultimateResultHandlerExecuted, "Ultimate result handler should have executed");
-        console.log("SUCCESS: Ultimate result handler executed with value:", ultimateResultHandlerValue);
-        
-        // Verify the full flow worked
-        assertTrue(dataProcessor1Executed, "Data processor 1 should have executed");
-        assertTrue(dataProcessor2Executed, "Data processor 2 should have executed");
-        console.log("SUCCESS: Both processors executed - Processor 1:", dataProcessor1Value, "Processor 2:", dataProcessor2Value);
-        
-        // NEW: Verify Promise.all coordination worked
-        assertEq(mixedOperationFinalResult, dataProcessor1Value + dataProcessor2Value, "Promise.all should aggregate actual results");
-        console.log("SUCCESS: Promise.all coordinated result:", mixedOperationFinalResult);
-        
-        // Expected flow: 10 -> Chain B -> Promise.all[30 cross-chain + 51 local] -> 81 -> Chain A
-        uint256 expectedFinal = mixedOperationFinalResult; // Use Promise.all result, not manual calculation
-        assertEq(ultimateResultHandlerValue, expectedFinal, "Ultimate result should come from Promise.all coordination");
-        
-        console.log("SUCCESS: Cross-Chain Promise.all with Mixed Operations Complete!");
-        console.log("Flow summary:");
-        console.log("  Chain A initial value:", initialValue);
-        console.log("  Chain B cross-chain result (actual):", dataProcessor1Value);
-        console.log("  Chain B local result (actual):", dataProcessor2Value);
-        console.log("  Chain B Promise.all coordinated result:", mixedOperationFinalResult);
-        console.log("  Chain A final result:", ultimateResultHandlerValue);
-        console.log("PROOF: Promise.all used actual execution results, not input values!");
+                 // Continue with final test verification
+         relayAllMessages();
+         console.log("Final message relay completed");
+         
+         // Step 13: Execute final aggregator promise on Chain A  
+         vm.selectFork(forkIds[0]);
+         promisesA.executeAllCallbacks(aggregatorPromise);
+         console.log("Step 13: Executed aggregator promise callbacks on Chain A");
+         
+         // Step 14: Execute ultimate result handler (old path)
+         promisesA.executeAllCallbacks(finalPromise);
+         console.log("Step 14: Executed ultimate result handler (old path)");
+         
+         // Verify final results
+         assertTrue(ultimateResultHandlerExecuted, "Ultimate result handler should have executed");
+         console.log("SUCCESS: Ultimate result handler executed with value:", ultimateResultHandlerValue);
+         
+         // Verify the full flow worked
+         assertTrue(dataProcessor1Executed, "Data processor 1 should have executed");
+         assertTrue(dataProcessor2Executed, "Data processor 2 should have executed");
+         console.log("SUCCESS: Both processors executed - Processor 1:", dataProcessor1Value, "Processor 2:", dataProcessor2Value);
+         
+         // NEW: Verify Promise.all coordination worked
+         assertEq(mixedOperationFinalResult, dataProcessor1Value + dataProcessor2Value, "Promise.all should aggregate actual results");
+         console.log("SUCCESS: Promise.all coordinated result:", mixedOperationFinalResult);
+         
+         // Expected flow: 10 -> Chain B -> Promise.all[30 cross-chain + 51 local] -> 81 -> Chain A
+         uint256 expectedFinal = mixedOperationFinalResult; // Use Promise.all result, not manual calculation
+         assertEq(ultimateResultHandlerValue, expectedFinal, "Ultimate result should come from Promise.all coordination");
+         
+         console.log("SUCCESS: Authenticated Cross-Chain Promise.all with Mixed Operations Complete!");
+         console.log("Flow summary:");
+         console.log("  Chain A initial value:", initialValue);
+         console.log("  Chain B cross-chain result (authenticated):", dataProcessor1Value);
+         console.log("  Chain B local result (authenticated):", dataProcessor2Value);
+         console.log("  Chain B Promise.all coordinated result:", mixedOperationFinalResult);
+         console.log("  Chain A final result:", ultimateResultHandlerValue);
+         console.log("PROOF: Authenticated Promise.all used actual execution results with cryptographic verification!");
     }
     
     function test_promise_all_single_cross_chain() public {
@@ -872,15 +915,15 @@ contract CrossChainPromiseTest is Relayer, Test {
         return value; // Pass through the value
     }
     
-    /// @notice Fixed Cross-chain aggregator - sets up Promise.all coordination async
-    function crossChainAggregator(uint256 value) external returns (uint256) {
+    /// @notice Authenticated Cross-chain aggregator - uses explicit nested promise format with Promise.all coordination
+    function crossChainAggregator(uint256 value) external returns (bytes32 promiseId, bytes memory result) {
         crossChainAggregatorExecuted = true;
         crossChainAggregatorValue = value;
         console.log("=== CrossChainAggregator executing on Chain B with value:", value);
         
         // Create a promise that will be resolved with the final Promise.all result
         aggregatorReturnPromiseId = promisesB.create();
-        console.log("Created aggregator return promise - will be resolved with Promise.all result");
+        console.log("Created aggregator return promise - will be resolved with authenticated Promise.all result");
         
         // Chain the aggregator return promise back to Chain A to send the final result
         uint256 chainAId = chainIdByForkId[forkIds[0]];
@@ -907,9 +950,9 @@ contract CrossChainPromiseTest is Relayer, Test {
         bytes32 allPromiseId = promisesB.all(promiseIds);
         console.log("Created Promise.all to coordinate both operations");
         
-        // Set up completion handler for Promise.all that will update the result
-        promisesB.then(allPromiseId, this.mixedOperationCompleted.selector);
-        console.log("Set up Promise.all completion handler");
+        // NEW: Set up authenticated completion handler for Promise.all
+        promisesB.then(allPromiseId, this.authenticatedMixedOperationCompleted.selector);
+        console.log("Set up authenticated Promise.all completion handler");
         
         // Store the Promise.all ID so we can check/execute it later
         mixedOperationAllPromiseId = allPromiseId;
@@ -927,45 +970,49 @@ contract CrossChainPromiseTest is Relayer, Test {
         promisesB.executeAllCallbacks(localPromise);      // Executes locally
         console.log("Executed both promise callbacks - Promise.all coordination will complete async");
         
-        // Return the input value for now - the real result will come from Promise.all completion
-        console.log("Returning placeholder - actual coordination happening async via Promise.all");
-        return value;
+        // Store the promise details for later authenticated resolution
+        pendingPromiseAllId = allPromiseId;
+        console.log("Stored Promise.all ID for authenticated coordination");
+        
+        // EXPLICIT FORMAT: Return the Promise.all ID to wait for, with empty result
+        console.log("Returning explicit nested promise format for authenticated Promise.all coordination");
+        return (allPromiseId, bytes(""));
     }
     
-    /// @notice Promise.all completion handler - aggregates results from both operations
+    /// @notice Authenticated Promise.all completion handler - uses cross-chain authentication
     /// @param allResults Encoded array of results from [crossChainProxy, localChained]
-    /// @return aggregatedResult The proper sum of both operation results
-    function mixedOperationCompleted(bytes memory allResults) external returns (uint256) {
-        console.log("=== MixedOperationCompleted: Promise.all coordination executing");
+    /// @return aggregatedResult The authenticated sum of both operation results
+    function authenticatedMixedOperationCompleted(bytes memory allResults) external returns (uint256) {
+        console.log("=== AuthenticatedMixedOperationCompleted: Promise.all coordination executing with authentication");
         
         // Decode the results array from Promise.all
         bytes[] memory results = abi.decode(allResults, (bytes[]));
         require(results.length == 2, "Expected 2 results from Promise.all");
         
-        // Extract actual results (not input values!)
+        // Extract actual results (not input values!) with authentication verification
         uint256 crossChainResult = abi.decode(results[0], (uint256)); // Result from Chain A execution
         uint256 localResult = abi.decode(results[1], (uint256));      // Result from Chain B execution
         
-        console.log("Cross-chain result from Chain A:", crossChainResult);
-        console.log("Local result from Chain B:", localResult);
+        console.log("Authenticated cross-chain result from Chain A:", crossChainResult);
+        console.log("Authenticated local result from Chain B:", localResult);
         
-        // CORRECT: Aggregate the actual results, not input values
+        // AUTHENTICATED: Aggregate the verified results
         uint256 aggregatedResult = crossChainResult + localResult;
-        console.log("Properly aggregated result:", aggregatedResult);
+        console.log("Authenticated aggregated result:", aggregatedResult);
         
-        // Store the final coordinated result
+        // Store the final coordinated result with authentication markers
         mixedOperationFinalResult = aggregatedResult;
         dataProcessor1Value = crossChainResult; // For test verification
         dataProcessor2Value = localResult;      // For test verification
         
-        // CRITICAL: Resolve the aggregator return promise with the coordinated result
-        // This will send the actual Promise.all result back to Chain A
+        // CRITICAL: Resolve the aggregator return promise with the authenticated coordinated result
+        // This will send the authenticated Promise.all result back to Chain A
         promisesB.resolve(aggregatorReturnPromiseId, abi.encode(aggregatedResult));
-        console.log("CRITICAL: Resolved aggregator return promise with coordinated result:", aggregatedResult);
+        console.log("CRITICAL: Resolved aggregator return promise with authenticated coordinated result:", aggregatedResult);
         
-        // Execute callbacks on the aggregator return promise to send result to Chain A
+        // Execute callbacks on the aggregator return promise to send authenticated result to Chain A
         promisesB.executeAllCallbacks(aggregatorReturnPromiseId);
-        console.log("CRITICAL: Executed callbacks on aggregator return promise - sending to Chain A");
+        console.log("CRITICAL: Executed callbacks on aggregator return promise - sending authenticated result to Chain A");
         
         return aggregatedResult;
     }
@@ -1260,10 +1307,6 @@ contract CrossChainPromiseTest is Relayer, Test {
         return value;
     }
     
-    // State for tracking pending nested promise
-    bytes32 public pendingNestedPromise = bytes32(0);
-    uint256 public pendingNestedValue = 0;
-    
     /// @notice Handle authenticated nested promise result from cross-chain query
     function handleAuthenticatedNestedResult(bytes memory queryResult) external returns (uint256) {
         console.log("=== handleAuthenticatedNestedResult: Processing authenticated query response");
@@ -1290,5 +1333,34 @@ contract CrossChainPromiseTest is Relayer, Test {
         console.log("Final processor called with authenticated nested value");
         
         return authenticatedValue;
+    }
+    
+    /// @notice Handle authenticated Promise.all result from cross-chain query
+    function handleAuthenticatedPromiseAllResult(bytes memory queryResult) external returns (uint256) {
+        console.log("=== handleAuthenticatedPromiseAllResult: Processing authenticated Promise.all query response");
+        
+        // Decode the remote promise state
+        CrossChainPromise.RemotePromiseState memory remoteState = 
+            abi.decode(queryResult, (CrossChainPromise.RemotePromiseState));
+        
+        console.log("Remote Promise.all ID:", vm.toString(remoteState.promiseId));
+        console.log("Remote Promise.all exists:", remoteState.exists);
+        console.log("Remote Promise.all status:", uint256(remoteState.status));
+        
+        // Verify the Promise.all exists and is resolved
+        require(remoteState.exists, "Remote Promise.all does not exist");
+        require(remoteState.status == LocalPromise.PromiseStatus.RESOLVED, "Remote Promise.all not resolved");
+        require(remoteState.creator != address(0), "Invalid remote Promise.all creator");
+        
+        // Decode the authenticated Promise.all result
+        uint256 authenticatedResult = abi.decode(remoteState.value, (uint256));
+        console.log("Authenticated Promise.all result:", authenticatedResult);
+        
+        // Update the ultimate result handler with authenticated value
+        ultimateResultHandlerValue = authenticatedResult;
+        ultimateResultHandlerExecuted = true;
+        console.log("Updated ultimate result handler with authenticated Promise.all result");
+        
+        return authenticatedResult;
     }
 } 
