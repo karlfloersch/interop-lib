@@ -313,16 +313,16 @@ contract CrossChainPromise is LocalPromise {
     
     /// @notice Override executeCallback to handle cross-chain forwarding
     function executeCallback(bytes32 promiseId, uint256 callbackIndex) external override returns (bytes32 nextPromiseId) {
-        // ✅ REUSE parent core logic - maximum code reuse!
+        // REUSE parent core logic - maximum code reuse!
         nextPromiseId = _executeCallbackCore(promiseId, callbackIndex);
         
-        // ✅ ONLY add our cross-chain specific logic
+        // ONLY add our cross-chain specific logic
         _handleCrossChainForwarding(promiseId);
     }
     
     /// @notice Override executeAllCallbacks to handle cross-chain forwarding
     function executeAllCallbacks(bytes32 promiseId) external override returns (bytes32[] memory nextPromiseIds) {
-        // ✅ REUSE parent implementation logic
+        // REUSE parent implementation logic
         Callback[] storage callbackList = callbacks[promiseId];
         nextPromiseIds = new bytes32[](callbackList.length);
         uint256 nextCount = 0;
@@ -340,7 +340,7 @@ contract CrossChainPromise is LocalPromise {
             mstore(nextPromiseIds, nextCount)
         }
         
-        // ✅ ONLY add our cross-chain specific logic
+        // ONLY add our cross-chain specific logic
         _handleCrossChainForwarding(promiseId);
     }
     
