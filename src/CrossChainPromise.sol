@@ -211,6 +211,9 @@ contract CrossChainPromise is LocalPromise {
         uint256 returnChain,
         bytes32 returnPromiseId
     ) external onlyPromiseLibrary {
+        // Debug: Confirm remote promise setup is being called
+        emit CrossChainCallbackExecuted(remotePromiseId, true, abi.encode("setupRemotePromise called"));
+        
         // Create the remote promise with predictable ID
         promises[remotePromiseId] = PromiseState({
             status: PromiseStatus.PENDING,

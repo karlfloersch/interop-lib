@@ -1177,11 +1177,11 @@ contract CrossChainPromiseTest is Relayer, Test {
         promisesA.resolve(initialPromise, abi.encode(uint256(100)));
         promisesA.executeAllCallbacks(initialPromise);
         
-        // Relay to Chain B
+        // Relay to Chain B - this should trigger setupRemotePromise and executeRemoteCallback
         relayAllMessages();
         console.log("Chain B callback executed with explicit format");
         
-        // CRITICAL: Now resolve the pending nested promise to trigger forwarding
+        // Now resolve the pending nested promise to trigger forwarding
         console.log("Resolving pending nested promise...");
         vm.selectFork(forkIds[1]); // Switch to Chain B
         if (pendingNestedPromise != bytes32(0)) {
