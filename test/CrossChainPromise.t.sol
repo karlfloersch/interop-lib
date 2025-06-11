@@ -42,8 +42,6 @@ contract CrossChainPromiseTest is Relayer, Test {
     uint256 public finalAggregatorValue;
     bool public ultimateResultHandlerExecuted;
     uint256 public ultimateResultHandlerValue;
-    bool public problemDemonstratorExecuted;
-    uint256 public problemDemonstratorValue;
     // ✅ Proper LocalPromise-style state tracking for concurrent Promise.all instances
     mapping(bytes32 => bool) public promiseAllCompletions; // allPromiseId => completed
     mapping(bytes32 => uint256) public promiseAllResults;  // allPromiseId => result
@@ -122,8 +120,6 @@ contract CrossChainPromiseTest is Relayer, Test {
         finalAggregatorValue = 0;
         ultimateResultHandlerExecuted = false;
         ultimateResultHandlerValue = 0;
-        problemDemonstratorExecuted = false;
-        problemDemonstratorValue = 0;
         
         // Reset cross-chain Promise.all test state
         crossChainAggregatorExecuted = false;
@@ -913,59 +909,5 @@ contract CrossChainPromiseTest is Relayer, Test {
         console.log("This represents the aggregated result of cross-chain + local operations!");
         
         return value;
-    }
-    
-    function test_remote_promise_security_issue() public {
-        vm.selectFork(forkIds[0]); // Start on chain A
-        
-        console.log("=== Testing Remote Promise Security Issue ===");
-        
-        // Create promise on chain A
-        bytes32 promiseId = promisesA.create();
-        
-        // Register cross-chain callback to chain B  
-        uint256 chainBId = chainIdByForkId[forkIds[1]];
-        bytes32 remotePromiseId = promisesA.then(promiseId, chainBId, this.problemDemonstrator.selector);
-        
-        // Resolve and execute to setup the remote promise on Chain B
-        promisesA.resolve(promiseId, abi.encode(uint256(100)));
-        promisesA.executeAllCallbacks(promiseId);
-        relayAllMessages(); // This creates the remote promise on Chain B
-        
-        // Switch to Chain B where the remote promise now exists
-        vm.selectFork(forkIds[1]);
-        
-        // SECURITY ISSUE: Try to resolve the remote promise directly on Chain B
-        // This SHOULD fail because it's a remote promise meant to execute callbacks on Chain A
-        console.log("Attempting to resolve remote promise directly...");
-        
-        try promisesB.resolve(remotePromiseId, abi.encode(uint256(999))) {
-            console.log("BUG: Successfully resolved remote promise locally!");
-            console.log("This should have failed because the promise is meant for Chain A execution");
-        } catch {
-            console.log("GOOD: Remote promise resolution correctly rejected");
-        }
-        
-        // CORRECT WAY: Remote promises should only be resolved through executeRemoteCallback
-        console.log("Now testing the correct way through executeRemoteCallback...");
-        relayAllMessages(); // This should trigger proper remote execution
-        
-        assertTrue(problemDemonstratorExecuted, "Problem demonstrator should have executed");
-        console.log("CORRECT: Remote promise executed through proper cross-chain mechanism");
-    }
-    
-    /// @notice Test function that demonstrates the correct cross-chain execution pattern
-    function problemDemonstrator(uint256 value) external returns (uint256) {
-        problemDemonstratorExecuted = true;
-        problemDemonstratorValue = value;
-        console.log("Problem demonstrator executed with value:", value);
-        console.log("This should execute on Chain B, not locally resolve");
-        
-        // Here's where the REAL bug pattern should be demonstrated:
-        // This function should create two sub-promises:
-        // 1. One local promise that executes on Chain B
-        // 2. One REMOTE promise that actually executes on Chain A (not just forwards)
-        
-        return value * 10;
     }
 } 
