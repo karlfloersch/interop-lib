@@ -211,9 +211,6 @@ contract CrossChainPromise is LocalPromise {
         uint256 returnChain,
         bytes32 returnPromiseId
     ) external onlyPromiseLibrary {
-        // Debug: Confirm remote promise setup is being called
-        emit CrossChainCallbackExecuted(remotePromiseId, true, abi.encode("setupRemotePromise called"));
-        
         // Create the remote promise with predictable ID
         promises[remotePromiseId] = PromiseState({
             status: PromiseStatus.PENDING,
@@ -252,9 +249,6 @@ contract CrossChainPromise is LocalPromise {
         bytes32 remotePromiseId,
         bytes memory value
     ) external onlyPromiseLibrary {
-        // Debug: Confirm this function is being called
-        emit CrossChainCallbackExecuted(remotePromiseId, true, abi.encode("executeRemoteCallback called"));
-        
         // Resolve the remote promise first
         _setPromiseState(remotePromiseId, PromiseStatus.RESOLVED, value);
         
@@ -276,36 +270,24 @@ contract CrossChainPromise is LocalPromise {
                 emit CrossChainCallbackExecuted(remotePromiseId, success, returnData);
                 
                 if (success && returnData.length > 0) {
-                    // Debug: Log the raw return data to understand what we're getting
-                    emit CrossChainCallbackExecuted(remotePromiseId, true, abi.encode("Raw return data length", returnData.length));
-                    
                     // Try to decode as explicit nested promise format: (bytes32 promiseId, bytes memory result)
                     (bytes32 explicitPromiseId, bytes memory explicitResult) = _tryDecodeAsExplicitReturn(returnData);
                     
-                    // Debug: Log what we decoded
-                    emit CrossChainCallbackExecuted(remotePromiseId, true, abi.encode("Decoded explicit promise", explicitPromiseId));
-                    
                     if (explicitPromiseId != bytes32(0)) {
                         // EXPLICIT NESTED PROMISE: Callback wants us to wait for this promise
-                        emit CrossChainCallbackExecuted(remotePromiseId, true, abi.encode("Detected explicit nested promise"));
-                        
                         if (_isValidPendingPromise(explicitPromiseId)) {
                             nestedPromiseId = explicitPromiseId;
-                            emit CrossChainCallbackExecuted(remotePromiseId, true, abi.encode("Valid pending promise"));
                             // We'll wait for this promise to resolve before forwarding result
                         } else {
                             // Invalid promise ID - use error message as result
-                            emit CrossChainCallbackExecuted(remotePromiseId, false, abi.encode("Invalid promise ID"));
                             finalReturnValue = abi.encode("Invalid nested promise ID");
                             callbackSucceeded = false;
                         }
                     } else if (explicitResult.length > 0) {
                         // EXPLICIT RESULT: Use the provided result value
-                        emit CrossChainCallbackExecuted(remotePromiseId, true, abi.encode("Using explicit result"));
                         finalReturnValue = explicitResult;
                     } else {
                         // LEGACY: Use raw return data
-                        emit CrossChainCallbackExecuted(remotePromiseId, true, abi.encode("Using legacy format"));
                         finalReturnValue = returnData;
                     }
                 } else if (!success) {
@@ -323,14 +305,9 @@ contract CrossChainPromise is LocalPromise {
         if (nestedPromiseId != bytes32(0)) {
             // Track the relationship between nested and remote promise
             nestedToRemotePromise[nestedPromiseId] = remotePromiseId;
-            currentNestedPromise = nestedPromiseId; // RESTORED: Track current nested promise
-            
-            // Debug: Confirm we're setting up nested forwarding
-            emit CrossChainCallbackExecuted(nestedPromiseId, true, abi.encode("Setting up nested forwarding"));
-            emit CrossChainCallbackExecuted(remotePromiseId, true, abi.encode("For remote promise"));
+            currentNestedPromise = nestedPromiseId;
             
             // Setup nested promise chain: when nested resolves, forward result
-            // CRITICAL FIX: Store the remotePromiseId in nextPromiseId so forwarding callback can access it
             callbacks[nestedPromiseId].push(Callback({
                 target: address(this),
                 selector: this._forwardNestedResult.selector,
@@ -339,7 +316,6 @@ contract CrossChainPromise is LocalPromise {
             }));
             
             emit NestedPromiseDetected(remotePromiseId, nestedPromiseId);
-            emit CrossChainCallbackExecuted(nestedPromiseId, true, abi.encode("Registered forwarding callback"));
             
             // Don't forward result yet - wait for nested promise
             return;
@@ -353,22 +329,13 @@ contract CrossChainPromise is LocalPromise {
     function _forwardNestedResult(bytes memory nestedValue) external returns (bytes memory) {
         require(msg.sender == address(this), "CrossChainPromise: only self can call");
         
-        // SIMPLIFIED APPROACH: Since we have a single nested promise in our test scenario,
-        // we can check all active mappings and forward the first one we find
-        
-        // Debug: log that we're in the forwarding function
-        emit CrossChainCallbackExecuted(bytes32(0), true, abi.encode("_forwardNestedResult called"));
-        
+        // Find the active nested-to-remote mapping
         bytes32 originalRemotePromiseId = bytes32(0);
         bytes32 nestedPromiseId = bytes32(0);
         
-        // Look for any active nested-to-remote mapping
-        // Since mappings can't be iterated in Solidity, we'll check the known nested promise
         if (currentNestedPromise != bytes32(0)) {
             nestedPromiseId = currentNestedPromise;
             originalRemotePromiseId = nestedToRemotePromise[currentNestedPromise];
-            
-            emit CrossChainCallbackExecuted(nestedPromiseId, true, abi.encode("Found mapping via currentNestedPromise"));
         }
         
         // If we found a valid mapping, forward the result
@@ -377,13 +344,8 @@ contract CrossChainPromise is LocalPromise {
             delete nestedToRemotePromise[nestedPromiseId];
             currentNestedPromise = bytes32(0);
             
-            emit CrossChainCallbackExecuted(originalRemotePromiseId, true, abi.encode("Forwarding nested result"));
-            
             // Forward the nested result back to the source chain
             _forwardCrossChainResult(originalRemotePromiseId, nestedValue, true);
-        } else {
-            // Debug: This helps us understand why forwarding failed
-            emit CrossChainCallbackExecuted(bytes32(0), false, abi.encode("No active nested mapping found"));
         }
         
         return nestedValue;
