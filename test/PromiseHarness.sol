@@ -2,90 +2,119 @@
 pragma solidity 0.8.25;
 
 import {Promise} from "../src/Promise.sol";
-import {SetTimeout} from "../src/SetTimeout.sol";
-import {Callback} from "../src/Callback.sol";
+import {IResolvable} from "../src/interfaces/IResolvable.sol";
 
 /// @title PromiseHarness
 /// @notice Test harness that automatically resolves pending promises to improve test readability
 contract PromiseHarness {
     Promise public immutable promiseContract;
-    SetTimeout public immutable setTimeoutContract;
-    Callback public immutable callbackContract;
+    IResolvable[] public resolvableContracts;
+
+    /// @notice Structure to hold resolvable promises
+    struct ResolvablePromise {
+        IResolvable resolvableContract;
+        uint256 promiseId;
+    }
 
     /// @notice Event emitted when promises are resolved
-    event PromisesResolved(uint256 timeoutsResolved, uint256 callbacksResolved);
+    event PromisesResolved(uint256 promisesResolved);
 
-    constructor(address _promise, address _setTimeout, address _callback) {
+    constructor(address _promise, address[] memory _resolvableContracts) {
         promiseContract = Promise(_promise);
-        setTimeoutContract = SetTimeout(_setTimeout);
-        callbackContract = Callback(_callback);
+        for (uint256 i = 0; i < _resolvableContracts.length; i++) {
+            resolvableContracts.push(IResolvable(_resolvableContracts[i]));
+        }
     }
 
-    /// @notice Attempt to resolve all pending timeouts and callbacks
+    /// @notice Attempt to resolve one layer of pending promises
+    /// @dev Collects all resolvable promises first, then resolves them to avoid ordering issues
     /// @param maxPromiseId The maximum promise ID to check (for efficiency)
-    /// @return timeoutsResolved Number of timeouts resolved
-    /// @return callbacksResolved Number of callbacks resolved
-    function resolveAllPending(uint256 maxPromiseId) external returns (uint256 timeoutsResolved, uint256 callbacksResolved) {
-        timeoutsResolved = 0;
-        callbacksResolved = 0;
+    /// @return promisesResolved Number of promises resolved
+    function resolveAllPending(uint256 maxPromiseId) external returns (uint256 promisesResolved) {
+        // First pass: collect all resolvable promises
+        ResolvablePromise[] memory resolvablePromises = new ResolvablePromise[](maxPromiseId * resolvableContracts.length);
+        uint256 resolvableCount = 0;
 
-        // Resolve timeouts first (they create the base resolved promises)
         for (uint256 i = 1; i <= maxPromiseId; i++) {
-            if (promiseContract.exists(i) && setTimeoutContract.canResolve(i)) {
-                try setTimeoutContract.resolve(i) {
-                    timeoutsResolved++;
-                } catch {
-                    // Ignore errors (promise might have been resolved elsewhere)
+            if (!promiseContract.exists(i)) continue;
+
+            for (uint256 j = 0; j < resolvableContracts.length; j++) {
+                if (resolvableContracts[j].canResolve(i)) {
+                    resolvablePromises[resolvableCount] = ResolvablePromise({
+                        resolvableContract: resolvableContracts[j],
+                        promiseId: i
+                    });
+                    resolvableCount++;
                 }
             }
         }
 
-        // Then resolve callbacks (they depend on resolved parent promises)
-        for (uint256 i = 1; i <= maxPromiseId; i++) {
-            if (promiseContract.exists(i) && callbackContract.canResolve(i)) {
-                try callbackContract.resolve(i) {
-                    callbacksResolved++;
-                } catch {
-                    // Ignore errors (callback might have been resolved elsewhere)
-                }
+        // Second pass: resolve all collected promises
+        promisesResolved = 0;
+        for (uint256 i = 0; i < resolvableCount; i++) {
+            try resolvablePromises[i].resolvableContract.resolve(resolvablePromises[i].promiseId) {
+                promisesResolved++;
+            } catch {
+                // Ignore errors (promise might have been resolved elsewhere)
             }
         }
 
-        emit PromisesResolved(timeoutsResolved, callbacksResolved);
+        emit PromisesResolved(promisesResolved);
     }
 
-    /// @notice Resolve all pending promises up to the current max promise ID
-    /// @return timeoutsResolved Number of timeouts resolved
-    /// @return callbacksResolved Number of callbacks resolved
-    function resolveAllPendingAuto() external returns (uint256 timeoutsResolved, uint256 callbacksResolved) {
+    /// @notice Resolve all pending promises up to the current max promise ID (one layer only)
+    /// @return promisesResolved Number of promises resolved
+    function resolveAllPendingAuto() external returns (uint256 promisesResolved) {
         uint256 maxPromiseId = promiseContract.getNextPromiseId() - 1;
         return this.resolveAllPending(maxPromiseId);
     }
 
+    /// @notice Resolve all promise layers until nothing more can be resolved
+    /// @dev Calls resolveAllPendingAuto() repeatedly until no more promises are resolved
+    /// @return totalPromises Total promises resolved across all layers
+    /// @return layers Number of resolution layers processed
+    function resolveAllLayers() external returns (uint256 totalPromises, uint256 layers) {
+        totalPromises = 0;
+        layers = 0;
+
+        while (true) {
+            uint256 resolved = this.resolveAllPendingAuto();
+            
+            if (resolved == 0) {
+                break; // No more promises to resolve
+            }
+            
+            totalPromises += resolved;
+            layers++;
+            
+            // Safety check to prevent infinite loops (max 10 layers)
+            if (layers >= 10) {
+                break;
+            }
+        }
+    }
+
     /// @notice Check how many promises are pending resolution
     /// @param maxPromiseId The maximum promise ID to check
-    /// @return pendingTimeouts Number of pending timeouts
-    /// @return pendingCallbacks Number of pending callbacks
-    function countPending(uint256 maxPromiseId) external view returns (uint256 pendingTimeouts, uint256 pendingCallbacks) {
-        pendingTimeouts = 0;
-        pendingCallbacks = 0;
+    /// @return pendingPromises Number of pending promises
+    function countPending(uint256 maxPromiseId) external view returns (uint256 pendingPromises) {
+        pendingPromises = 0;
 
         for (uint256 i = 1; i <= maxPromiseId; i++) {
-            if (promiseContract.exists(i)) {
-                if (setTimeoutContract.canResolve(i)) {
-                    pendingTimeouts++;
-                }
-                if (callbackContract.canResolve(i)) {
-                    pendingCallbacks++;
+            if (!promiseContract.exists(i)) continue;
+
+            for (uint256 j = 0; j < resolvableContracts.length; j++) {
+                if (resolvableContracts[j].canResolve(i)) {
+                    pendingPromises++;
+                    break; // Don't double count if multiple contracts can resolve the same promise
                 }
             }
         }
     }
 
     /// @notice Check how many promises are pending resolution (auto max ID)
-    /// @return pendingTimeouts Number of pending timeouts
-    /// @return pendingCallbacks Number of pending callbacks
-    function countPendingAuto() external view returns (uint256 pendingTimeouts, uint256 pendingCallbacks) {
+    /// @return pendingPromises Number of pending promises
+    function countPendingAuto() external view returns (uint256 pendingPromises) {
         uint256 maxPromiseId = promiseContract.getNextPromiseId() - 1;
         return this.countPending(maxPromiseId);
     }
@@ -105,26 +134,17 @@ contract PromiseHarness {
         }
     }
 
-    /// @notice Force resolve timeouts by warping time far into the future
-    /// @dev Only use in tests! This advances block.timestamp
-    function forceResolveTimeouts() external {
-        // Warp time to very far in the future
-        uint256 futureTime = block.timestamp + 365 days;
-        
-        // Note: This function relies on vm.warp being available in the test environment
-        // It cannot actually warp time on its own, but serves as a helper for tests
-        
-        // In actual usage, tests should call vm.warp(futureTime) before calling this
-        uint256 maxPromiseId = promiseContract.getNextPromiseId() - 1;
-        
-        for (uint256 i = 1; i <= maxPromiseId; i++) {
-            if (promiseContract.exists(i) && setTimeoutContract.canResolve(i)) {
-                try setTimeoutContract.resolve(i) {
-                    // Successfully resolved
-                } catch {
-                    // Ignore errors
-                }
-            }
-        }
+    /// @notice Get the number of resolvable contracts registered
+    /// @return count Number of resolvable contracts
+    function getResolvableContractCount() external view returns (uint256 count) {
+        return resolvableContracts.length;
+    }
+
+    /// @notice Get a resolvable contract by index
+    /// @param index The index of the resolvable contract
+    /// @return resolvableContract The resolvable contract at the given index
+    function getResolvableContract(uint256 index) external view returns (IResolvable resolvableContract) {
+        require(index < resolvableContracts.length, "PromiseHarness: index out of bounds");
+        return resolvableContracts[index];
     }
 } 

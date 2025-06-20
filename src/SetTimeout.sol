@@ -2,10 +2,11 @@
 pragma solidity 0.8.25;
 
 import {Promise} from "./Promise.sol";
+import {IResolvable} from "./interfaces/IResolvable.sol";
 
 /// @title SetTimeout
 /// @notice Time-based promise contract that resolves promises after a specified timestamp
-contract SetTimeout {
+contract SetTimeout is IResolvable {
     /// @notice The Promise contract instance
     Promise public immutable promiseContract;
 
