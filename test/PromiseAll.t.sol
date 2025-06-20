@@ -69,12 +69,23 @@ contract PromiseAllTest is Test {
         promiseAllContract.create(emptyArray);
     }
 
-    function test_cannotCreateWithNonExistentPromise() public {
+    function test_canCreateWithNonExistentPromise() public {
         uint256[] memory inputPromises = new uint256[](1);
-        inputPromises[0] = 999; // Non-existent promise
+        inputPromises[0] = 999; // Non-existent promise (could be cross-chain)
         
-        vm.expectRevert("PromiseAll: input promise does not exist");
-        promiseAllContract.create(inputPromises);
+        // Should succeed - allows cross-chain promises that haven't been shared yet
+        uint256 promiseAllId = promiseAllContract.create(inputPromises);
+        
+        // Verify the PromiseAll was created
+        assertTrue(promiseAllContract.exists(promiseAllId), "PromiseAll should exist");
+        
+        // Verify it contains the non-existent promise ID
+        uint256[] memory retrievedInputs = promiseAllContract.getInputPromises(promiseAllId);
+        assertEq(retrievedInputs.length, 1, "Should have 1 input promise");
+        assertEq(retrievedInputs[0], 999, "Input should match non-existent promise ID");
+        
+        // Should not be resolvable since the promise doesn't exist (is pending)
+        assertFalse(promiseAllContract.canResolve(promiseAllId), "Should not be resolvable with non-existent promise");
     }
 
     function test_resolveWhenAllPromisesResolve() public {

@@ -39,11 +39,6 @@ contract PromiseAll is IResolvable {
     function create(uint256[] memory inputPromises) external returns (uint256 promiseAllId) {
         require(inputPromises.length > 0, "PromiseAll: empty input array");
         
-        // Verify all input promises exist
-        for (uint256 i = 0; i < inputPromises.length; i++) {
-            require(promiseContract.exists(inputPromises[i]), "PromiseAll: input promise does not exist");
-        }
-        
         // Create a promise for this PromiseAll
         promiseAllId = promiseContract.create();
         
