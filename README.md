@@ -2,6 +2,8 @@
 
 A Solidity implementation of JavaScript-style promises for cross-chain and local asynchronous operations.
 
+**📊 Core Implementation: 426 lines of code** (Promise: 130, Callback: 150, PromiseAll: 99, SetTimeout: 47)
+
 ## Overview
 
 This library provides a comprehensive promise-based system for handling asynchronous operations in smart contracts, with support for both local and cross-chain execution. The system enables JavaScript-familiar promise semantics including creation, resolution, rejection, chaining, and aggregation across multiple blockchain networks.
