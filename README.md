@@ -128,6 +128,27 @@ uint256 promiseAllId = promiseAllContract.create(promises);
 
 The `test_PeriodicFeeCollectionAndBurning` test demonstrates a complete cross-chain automated fee collection and burning system that operates like a cron job:
 
+#### Architecture Overview
+- **CronScheduler** contract orchestrates the recurring workflow
+- **SetTimeout** creates periodic triggers (e.g., every hour)
+- **Cross-chain callbacks** collect fees from multiple chains
+- **PromiseAll** aggregates all fee collection results
+- **Burn callback** executes when all fees are collected
+- **Automatic scheduling** creates the next cycle timeout
+
+#### Flow Summary
+1. **Initialize cycle**: `startPeriodicFeeCollection()` sets up recurring 1-hour intervals
+2. **Trigger execution**: After 1 hour passes, `executeCycle()` is called
+3. **Fee collection setup**: Creates callbacks to collect fees from Chain A and Chain B
+4. **Aggregation setup**: Uses PromiseAll to wait for both fee collections
+5. **Burn setup**: Registers callback to burn fees when aggregation completes
+6. **Schedule next cycle**: Automatically creates timeout for next hour
+7. **Resolution cascade**: 
+   - Timeout resolves → Fee collection callbacks execute
+   - Fee collections complete → PromiseAll resolves  
+   - PromiseAll resolves → Burn callback executes
+   - System automatically schedules next cycle
+
 #### 1. Initial Setup
 
 ```solidity
