@@ -20,7 +20,7 @@ contract E2ETest is Test {
     address public charlie = address(0x3);
 
     function setUp() public {
-        promiseContract = new Promise();
+        promiseContract = new Promise(address(0));
         setTimeoutContract = new SetTimeout(address(promiseContract));
         callbackContract = new Callback(address(promiseContract));
         

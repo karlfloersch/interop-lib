@@ -20,7 +20,7 @@ contract PromiseAllTest is Test {
     event PromiseAllRejected(uint256 indexed promiseAllId, uint256 failedPromiseId, bytes errorData);
 
     function setUp() public {
-        promiseContract = new Promise();
+        promiseContract = new Promise(address(0));
         promiseAllContract = new PromiseAll(address(promiseContract));
         setTimeoutContract = new SetTimeout(address(promiseContract));
     }

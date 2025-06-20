@@ -16,7 +16,7 @@ contract CallbackTest is Test {
     event CallbackExecuted(uint256 indexed callbackPromiseId, bool success, bytes returnData);
 
     function setUp() public {
-        promiseContract = new Promise();
+        promiseContract = new Promise(address(0));
         callbackContract = new Callback(address(promiseContract));
     }
 
@@ -32,10 +32,11 @@ contract CallbackTest is Test {
         
         vm.prank(alice);
         uint256 parentPromiseId = promiseContract.create();
+        uint256 expectedCallbackId = promiseContract.generatePromiseId(2);
         
         vm.prank(bob);
         vm.expectEmit(true, true, false, true);
-        emit CallbackRegistered(2, parentPromiseId, Callback.CallbackType.Then);
+        emit CallbackRegistered(expectedCallbackId, parentPromiseId, Callback.CallbackType.Then);
         
         uint256 callbackPromiseId = callbackContract.then(
             parentPromiseId, 
@@ -43,7 +44,7 @@ contract CallbackTest is Test {
             testTarget.handleSuccess.selector
         );
         
-        assertEq(callbackPromiseId, 2, "Callback promise ID should be 2");
+        assertEq(callbackPromiseId, expectedCallbackId, "Callback promise ID should match expected global ID");
         
         Callback.CallbackData memory callbackData = callbackContract.getCallback(callbackPromiseId);
         assertEq(callbackData.parentPromiseId, parentPromiseId, "Parent promise ID should match");
@@ -60,10 +61,11 @@ contract CallbackTest is Test {
         
         vm.prank(alice);
         uint256 parentPromiseId = promiseContract.create();
+        uint256 expectedCallbackId = promiseContract.generatePromiseId(2);
         
         vm.prank(bob);
         vm.expectEmit(true, true, false, true);
-        emit CallbackRegistered(2, parentPromiseId, Callback.CallbackType.Catch);
+        emit CallbackRegistered(expectedCallbackId, parentPromiseId, Callback.CallbackType.Catch);
         
         uint256 callbackPromiseId = callbackContract.onReject(
             parentPromiseId, 
@@ -71,7 +73,7 @@ contract CallbackTest is Test {
             testTarget.handleError.selector
         );
         
-        assertEq(callbackPromiseId, 2, "Callback promise ID should be 2");
+        assertEq(callbackPromiseId, expectedCallbackId, "Callback promise ID should match expected global ID");
         
         Callback.CallbackData memory callbackData = callbackContract.getCallback(callbackPromiseId);
         assertEq(uint256(callbackData.callbackType), uint256(Callback.CallbackType.Catch), "Callback type should be Catch");

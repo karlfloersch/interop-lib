@@ -21,7 +21,7 @@ contract PromiseAllE2ETest is Test {
     address public bob = address(0x2);
 
     function setUp() public {
-        promiseContract = new Promise();
+        promiseContract = new Promise(address(0));
         promiseAllContract = new PromiseAll(address(promiseContract));
         setTimeoutContract = new SetTimeout(address(promiseContract));
         callbackContract = new Callback(address(promiseContract));
