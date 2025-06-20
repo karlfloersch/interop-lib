@@ -261,6 +261,209 @@ contract XChainCallbackTest is Test, Relayer {
         assertEq(target2.lastValue(), "Shared data", "Target 2 should receive correct data");
     }
 
+    /// @notice Test creating callbacks for promises that don't exist locally (remote promises)
+    function test_CallbackForRemotePromise() public {
+        vm.selectFork(forkIds[0]);
+        
+        // Create a promise on Chain A
+        uint256 remotePromiseId = promiseA.create();
+        
+        // Create target contract on Chain B
+        vm.selectFork(forkIds[1]);
+        TestTarget target = new TestTarget();
+        
+        // Create a callback on Chain B for the promise that only exists on Chain A
+        // This should work now that we removed the existence check
+        uint256 callbackPromiseId = callbackB.then(
+            remotePromiseId,
+            address(target),
+            target.handleSuccess.selector
+        );
+        
+        // Verify callback was created even though parent promise doesn't exist locally
+        assertTrue(callbackB.exists(callbackPromiseId), "Callback should exist even for remote promise");
+        assertFalse(promiseB.exists(remotePromiseId), "Parent promise should not exist locally on Chain B");
+        
+        // Callback should not be resolvable yet (parent promise not shared)
+        assertFalse(callbackB.canResolve(callbackPromiseId), "Callback should not be resolvable yet");
+        
+        // Resolve the promise on Chain A
+        vm.selectFork(forkIds[0]);
+        promiseA.resolve(remotePromiseId, abi.encode("Remote data"));
+        
+        // Share the resolved promise to Chain B
+        uint256 chainBId = chainIdByForkId[forkIds[1]];
+        promiseA.shareResolvedPromise(chainBId, remotePromiseId);
+        relayAllMessages();
+        
+        // Now on Chain B, the promise should exist and callback should be resolvable
+        vm.selectFork(forkIds[1]);
+        assertTrue(promiseB.exists(remotePromiseId), "Parent promise should now exist on Chain B");
+        assertEq(uint8(promiseB.status(remotePromiseId)), uint8(Promise.PromiseStatus.Resolved), "Parent should be resolved");
+        assertTrue(callbackB.canResolve(callbackPromiseId), "Callback should be resolvable now");
+        
+        // Execute the callback
+        callbackB.resolve(callbackPromiseId);
+        
+        // Verify callback executed successfully
+        assertTrue(target.successCalled(), "Target should have been called");
+        assertEq(target.lastValue(), "Remote data", "Target should receive data from remote promise");
+        assertEq(uint8(promiseB.status(callbackPromiseId)), uint8(Promise.PromiseStatus.Resolved), "Callback should be resolved");
+        assertFalse(callbackB.exists(callbackPromiseId), "Callback should be cleaned up");
+    }
+
+    /// @notice Test creating onReject callbacks for promises that don't exist locally (remote promises)
+    function test_OnRejectCallbackForRemotePromise() public {
+        vm.selectFork(forkIds[0]);
+        
+        // Create a promise on Chain A
+        uint256 remotePromiseId = promiseA.create();
+        
+        // Create target contract on Chain B
+        vm.selectFork(forkIds[1]);
+        TestTarget target = new TestTarget();
+        
+        // Create an onReject callback on Chain B for the promise that only exists on Chain A
+        uint256 callbackPromiseId = callbackB.onReject(
+            remotePromiseId,
+            address(target),
+            target.handleError.selector
+        );
+        
+        // Verify callback was created even though parent promise doesn't exist locally
+        assertTrue(callbackB.exists(callbackPromiseId), "Callback should exist even for remote promise");
+        assertFalse(promiseB.exists(remotePromiseId), "Parent promise should not exist locally on Chain B");
+        
+        // Reject the promise on Chain A
+        vm.selectFork(forkIds[0]);
+        promiseA.reject(remotePromiseId, abi.encode("Remote error"));
+        
+        // Share the rejected promise to Chain B
+        uint256 chainBId = chainIdByForkId[forkIds[1]];
+        promiseA.shareResolvedPromise(chainBId, remotePromiseId);
+        relayAllMessages();
+        
+        // Now on Chain B, the callback should be resolvable
+        vm.selectFork(forkIds[1]);
+        assertTrue(promiseB.exists(remotePromiseId), "Parent promise should now exist on Chain B");
+        assertEq(uint8(promiseB.status(remotePromiseId)), uint8(Promise.PromiseStatus.Rejected), "Parent should be rejected");
+        assertTrue(callbackB.canResolve(callbackPromiseId), "Callback should be resolvable now");
+        
+        // Execute the callback
+        callbackB.resolve(callbackPromiseId);
+        
+        // Verify callback executed successfully
+        assertTrue(target.errorCalled(), "Error handler should have been called");
+        assertEq(uint8(promiseB.status(callbackPromiseId)), uint8(Promise.PromiseStatus.Resolved), "Callback should be resolved");
+    }
+
+    /// @notice Test multiple callbacks for same remote promise
+    function test_MultipleCallbacksForSameRemotePromise() public {
+        vm.selectFork(forkIds[0]);
+        
+        // Create a promise on Chain A
+        uint256 remotePromiseId = promiseA.create();
+        
+        // Create multiple target contracts on Chain B
+        vm.selectFork(forkIds[1]);
+        TestTarget target1 = new TestTarget();
+        TestTarget target2 = new TestTarget();
+        TestTarget errorTarget = new TestTarget();
+        
+        // Create multiple callbacks on Chain B for the same remote promise
+        uint256 callback1 = callbackB.then(remotePromiseId, address(target1), target1.handleSuccess.selector);
+        uint256 callback2 = callbackB.then(remotePromiseId, address(target2), target2.handleSuccess.selector);
+        uint256 errorCallback = callbackB.onReject(remotePromiseId, address(errorTarget), errorTarget.handleError.selector);
+        
+        // All callbacks should exist even though parent promise doesn't exist locally
+        assertTrue(callbackB.exists(callback1), "Callback 1 should exist");
+        assertTrue(callbackB.exists(callback2), "Callback 2 should exist");
+        assertTrue(callbackB.exists(errorCallback), "Error callback should exist");
+        assertFalse(promiseB.exists(remotePromiseId), "Parent promise should not exist locally");
+        
+        // Resolve the promise on Chain A
+        vm.selectFork(forkIds[0]);
+        promiseA.resolve(remotePromiseId, abi.encode("Shared remote data"));
+        
+        // Share the resolved promise to Chain B
+        uint256 chainBId = chainIdByForkId[forkIds[1]];
+        promiseA.shareResolvedPromise(chainBId, remotePromiseId);
+        relayAllMessages();
+        
+        // Now all then callbacks should be resolvable, error callback should not
+        vm.selectFork(forkIds[1]);
+        assertTrue(callbackB.canResolve(callback1), "Callback 1 should be resolvable");
+        assertTrue(callbackB.canResolve(callback2), "Callback 2 should be resolvable");
+        assertTrue(callbackB.canResolve(errorCallback), "Error callback should be resolvable for rejection");
+        
+        // Execute all callbacks
+        callbackB.resolve(callback1);
+        callbackB.resolve(callback2);
+        callbackB.resolve(errorCallback); // This will reject since parent was resolved, not rejected
+        
+        // Verify then callbacks executed successfully
+        assertTrue(target1.successCalled(), "Target 1 should have been called");
+        assertTrue(target2.successCalled(), "Target 2 should have been called");
+        assertEq(target1.lastValue(), "Shared remote data", "Target 1 should receive remote data");
+        assertEq(target2.lastValue(), "Shared remote data", "Target 2 should receive remote data");
+        
+        // Verify error callback was rejected (since parent was resolved, not rejected)
+        assertFalse(errorTarget.errorCalled(), "Error target should not have been called");
+        assertEq(uint8(promiseB.status(errorCallback)), uint8(Promise.PromiseStatus.Rejected), "Error callback should be rejected");
+    }
+
+    /// @notice Test cross-chain callback registration for remote promises
+    function test_CrossChainCallbackForRemotePromise() public {
+        vm.selectFork(forkIds[0]);
+        
+        // Create a promise on Chain A
+        uint256 remotePromiseId = promiseA.create();
+        
+        // Create target contract on Chain B
+        vm.selectFork(forkIds[1]);
+        TestTarget target = new TestTarget();
+        
+        // Register cross-chain callback from Chain A to Chain B for the promise on Chain A
+        vm.selectFork(forkIds[0]);
+        uint256 chainBId = chainIdByForkId[forkIds[1]];
+        uint256 callbackPromiseId = callbackA.thenOn(
+            chainBId,
+            remotePromiseId,
+            address(target),
+            target.handleSuccess.selector
+        );
+        
+        // Relay the callback registration
+        relayAllMessages();
+        
+        // Verify callback was registered on Chain B
+        vm.selectFork(forkIds[1]);
+        assertTrue(callbackB.exists(callbackPromiseId), "Callback should be registered on Chain B");
+        
+        // The remote promise still doesn't exist on Chain B
+        assertFalse(promiseB.exists(remotePromiseId), "Remote promise should not exist on Chain B yet");
+        
+        // Resolve the promise on Chain A
+        vm.selectFork(forkIds[0]);
+        promiseA.resolve(remotePromiseId, abi.encode("Cross-chain data"));
+        
+        // Share the resolved promise to Chain B
+        promiseA.shareResolvedPromise(chainBId, remotePromiseId);
+        relayAllMessages();
+        
+        // Now the callback should be resolvable on Chain B
+        vm.selectFork(forkIds[1]);
+        assertTrue(promiseB.exists(remotePromiseId), "Remote promise should now exist on Chain B");
+        assertTrue(callbackB.canResolve(callbackPromiseId), "Callback should be resolvable");
+        
+        // Execute the callback
+        callbackB.resolve(callbackPromiseId);
+        
+        // Verify callback executed successfully
+        assertTrue(target.successCalled(), "Target should have been called");
+        assertEq(target.lastValue(), "Cross-chain data", "Target should receive cross-chain data");
+    }
+
     /// @notice Dummy handler for error testing
     function dummyHandler(bytes memory) external pure returns (string memory) {
         return "dummy";

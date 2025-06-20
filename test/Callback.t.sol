@@ -82,14 +82,30 @@ contract CallbackTest is Test {
         assertFalse(callbackContract.canResolve(callbackPromiseId), "Callback should not be resolvable yet");
     }
 
-    function test_cannotCreateCallbackForNonExistentPromise() public {
+    function test_canCreateCallbackForNonExistentPromise() public {
         test_setUp();
         
-        vm.expectRevert("Callback: parent promise does not exist");
-        callbackContract.then(999, address(testTarget), testTarget.handleSuccess.selector);
+        // Should now be able to create callbacks for non-existent promises (for cross-chain compatibility)
+        uint256 callback1 = callbackContract.then(999, address(testTarget), testTarget.handleSuccess.selector);
+        uint256 callback2 = callbackContract.onReject(999, address(testTarget), testTarget.handleError.selector);
         
-        vm.expectRevert("Callback: parent promise does not exist");
-        callbackContract.onReject(999, address(testTarget), testTarget.handleError.selector);
+        // Callbacks should exist even though parent promise doesn't exist locally
+        assertTrue(callbackContract.exists(callback1), "Then callback should exist for non-existent promise");
+        assertTrue(callbackContract.exists(callback2), "OnReject callback should exist for non-existent promise");
+        
+        // Callbacks should not be resolvable since parent promise doesn't exist
+        assertFalse(callbackContract.canResolve(callback1), "Then callback should not be resolvable for non-existent promise");
+        assertFalse(callbackContract.canResolve(callback2), "OnReject callback should not be resolvable for non-existent promise");
+        
+        // Verify callback data is stored correctly
+        Callback.CallbackData memory data1 = callbackContract.getCallback(callback1);
+        assertEq(data1.parentPromiseId, 999, "Parent promise ID should match");
+        assertEq(data1.target, address(testTarget), "Target should match");
+        assertEq(uint256(data1.callbackType), uint256(Callback.CallbackType.Then), "Should be Then callback");
+        
+        Callback.CallbackData memory data2 = callbackContract.getCallback(callback2);
+        assertEq(data2.parentPromiseId, 999, "Parent promise ID should match");
+        assertEq(uint256(data2.callbackType), uint256(Callback.CallbackType.Catch), "Should be Catch callback");
     }
 
     function test_resolveThenCallback() public {
