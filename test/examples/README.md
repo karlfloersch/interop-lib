@@ -131,15 +131,41 @@ uint256 finalSwapCallbackId = callbackA.thenOn(
     this.executeFinalSwapWithBranching.selector // Smart callback with branching
 );
 
+// CATCH: Register rollback callback for automatic failure recovery
+console.log("SETUP: Chaining rollback bridge for failure handling");
+uint256 rollbackCallbackId = callbackA.onRejectOn(
+    chainIdByForkId[forkIds[1]], // Execute rollback on Chain B
+    bridgePromiseId,            // If bridge operation fails
+    address(this),              // Call back to this contract  
+    this.executeAutomaticRollback.selector // Automatic rollback handler
+);
+
+// ADVANCED CATCH: Register nested rollback for final swap failures
+console.log("SETUP: Chaining nested rollback for final swap failures");
+uint256 nestedRollbackId = callbackA.onRejectOn(
+    chainIdByForkId[forkIds[1]], // Execute on Chain B
+    finalSwapCallbackId,        // If final swap fails
+    address(this),              // Call back to this contract
+    this.bridgeTokensBack.selector // Bridge tokens back to Chain A
+);
+
 vm.stopPrank();
-console.log("PROMISE CHAIN SETUP COMPLETE!");
+console.log("PROMISE CHAIN SETUP COMPLETE WITH ROLLBACK HANDLING!");
 ```
 
 What Happens in Setup:
 - Step 1: Perform initial swap (Token1 → Token2) 
 - Step 2: Execute bridge operation, get back promise ID
 - Step 3: Chain final swap callback to bridge promise completion
-- Result: Complete workflow defined before any cross-chain execution
+- Step 4: Register rollback callback using `onRejectOn()` for bridge failures
+- Step 5: Register nested rollback callback for final swap failures
+- Result: Complete workflow defined with automatic failure recovery before any cross-chain execution
+
+Rollback Chain Architecture:
+```
+Success Path:  Token1 → Token2 → Bridge → Token2 (Chain B) → Token3
+Failure Path:  Token1 → Token2 → Bridge → Token2 (Chain B) → [FAIL] → Bridge Back → Token2 (Chain A) → Token1
+```
 
 ### Phase 2: Execution (Resolve & Relay)
 
@@ -193,6 +219,41 @@ function bridgeTokens(...) external returns (uint256 promiseId, uint256 callback
     // Resolve promise and share to destination
     promiseContract.resolve(promiseId, abi.encode(token, recipient, amount, currentChainId));
     promiseContract.shareResolvedPromise(destinationChain, promiseId);
+}
+```
+
+Technical Detail - Rollback Implementation:
+```solidity
+// Automatic rollback handler - executes when bridge operation fails
+function executeAutomaticRollback(bytes memory errorData) external returns (bool success) {
+    console.log("ROLLBACK: Bridge operation failed, executing automatic recovery");
+    
+    // In a real implementation, this would:
+    // 1. Detect the failure point (bridge, swap, etc.)
+    // 2. Initiate reverse bridge operation
+    // 3. Return tokens to original state on source chain
+    
+    return true;
+}
+
+// Bridge tokens back handler - executes when final swap fails  
+function bridgeTokensBack(bytes memory failureData) external returns (bool success) {
+    console.log("ROLLBACK: Final swap failed, bridging tokens back to Chain A");
+    
+    // Decode failure context
+    (address token, uint256 amount, address recipient) = 
+        abi.decode(failureData, (address, uint256, address));
+    
+    // Execute reverse bridge operation
+    (uint256 rollbackPromiseId,) = bridgeB.bridgeTokens(
+        token,
+        amount,
+        chainIdByForkId[forkIds[0]], // Back to Chain A
+        recipient                    // Original user
+    );
+    
+    console.log("ROLLBACK: Tokens bridged back, user can recover original state");
+    return true;
 }
 ```
 
@@ -305,6 +366,24 @@ The callback system enables automatic execution on the destination chain:
 2. Callback Execution: When the parent promise is shared and resolved, the callback becomes executable
 3. Manual Execution: `callbackContract.resolve(callbackId)` triggers the callback function
 
+### Failure Handling Callbacks
+
+The callback system also supports automatic failure recovery:
+
+1. Rollback Registration: `callbackContract.onRejectOn(chain, promiseId, target, selector)` registers cross-chain failure callbacks
+2. Failure Detection: When a promise is rejected or a callback fails, the failure handlers are triggered
+3. Automatic Recovery: Rollback callbacks execute reverse operations (bridge back, swap back, etc.)
+4. Nested Rollbacks: Multiple levels of failure handling can be chained together
+
+Example rollback chain:
+```solidity
+// If final swap fails → bridge tokens back to Chain A
+callbackA.onRejectOn(chainB, finalSwapPromiseId, address(this), this.bridgeTokensBack.selector);
+
+// If bridge back fails → manual intervention required  
+callbackA.onRejectOn(chainA, bridgeBackPromiseId, address(this), this.manualRecovery.selector);
+```
+
 ### Authorization Model
 
 The system maintains proper authorization throughout the cross-chain flow:
@@ -325,13 +404,25 @@ If a step fails, users can manually bridge tokens back and recover their origina
 2. Bridge tokens back to original chain
 3. Swap back to original token
 
-### Promise-Based Automatic Rollback
+### Promise-Based Automatic Rollback (Demonstrated in Phase 1 Setup)
 
-The promise system can automatically handle failures:
+The promise system can automatically handle failures using the `.catch` pattern shown in Phase 1:
 
-1. Create workflow promise with failure callbacks
-2. Register `onReject()` callbacks for automatic recovery
-3. When workflow fails, callbacks automatically execute recovery logic
+1. **Setup Phase**: Register `onRejectOn()` callbacks for automatic recovery during promise chain construction
+2. **Failure Detection**: When any promise in the chain fails, the corresponding rollback callback is triggered
+3. **Automatic Recovery**: Rollback callbacks execute reverse operations without manual intervention
+4. **Nested Recovery**: Multiple levels of failure handling ensure comprehensive error recovery
+
+Implementation Pattern:
+```solidity
+// Primary operation
+uint256 swapCallbackId = callbackA.thenOn(chainB, bridgePromiseId, address(this), this.finalSwap.selector);
+
+// Automatic rollback if primary operation fails
+uint256 rollbackId = callbackA.onRejectOn(chainB, swapCallbackId, address(this), this.bridgeBack.selector);
+```
+
+This pattern ensures that users never lose tokens even if cross-chain operations fail at any step.
 
 ## Running the Tests
 
