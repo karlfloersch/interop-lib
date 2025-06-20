@@ -102,7 +102,7 @@ contract PromiseCrossChainTest is Test, Relayer {
     }
 
     /// @notice Test sharing a resolved promise across chains
-    function test_SharePromise_Resolved() public {
+    function test_ShareResolvedPromise_Resolved() public {
         vm.selectFork(forkIds[0]);
         
         // Create and resolve a promise on Chain A
@@ -111,7 +111,7 @@ contract PromiseCrossChainTest is Test, Relayer {
         
         // Share the resolved promise to Chain B
         uint256 chainBId = chainIdByForkId[forkIds[1]];
-        promiseA.sharePromise(chainBId, promiseId);
+        promiseA.shareResolvedPromise(chainBId, promiseId);
         
         // Relay the message to Chain B
         relayAllMessages();
@@ -125,7 +125,7 @@ contract PromiseCrossChainTest is Test, Relayer {
     }
 
     /// @notice Test sharing a rejected promise across chains
-    function test_SharePromise_Rejected() public {
+    function test_ShareResolvedPromise_Rejected() public {
         vm.selectFork(forkIds[0]);
         
         // Create and reject a promise on Chain A
@@ -134,7 +134,7 @@ contract PromiseCrossChainTest is Test, Relayer {
         
         // Share the rejected promise to Chain B
         uint256 chainBId = chainIdByForkId[forkIds[1]];
-        promiseA.sharePromise(chainBId, promiseId);
+        promiseA.shareResolvedPromise(chainBId, promiseId);
         
         // Relay the message to Chain B
         relayAllMessages();
@@ -194,7 +194,7 @@ contract PromiseCrossChainTest is Test, Relayer {
         uint256 promiseId = promiseA.create();
         uint256 chainAId = chainIdByForkId[forkIds[0]];
         vm.expectRevert("Promise: cannot share to same chain");
-        promiseA.sharePromise(chainAId, promiseId);
+        promiseA.shareResolvedPromise(chainAId, promiseId);
         
         // Try to transfer to the same chain (should revert)
         vm.expectRevert("Promise: cannot transfer to same chain");
@@ -254,5 +254,65 @@ contract PromiseCrossChainTest is Test, Relayer {
         assertEq(emptyPromise.creator, address(0));
         assertEq(uint8(emptyPromise.status), uint8(Promise.PromiseStatus.Pending));
         assertEq(emptyPromise.returnData.length, 0);
+    }
+
+    /// @notice Test that sharing pending promises is not allowed
+    function test_CannotSharePendingPromise() public {
+        vm.selectFork(forkIds[0]);
+        
+        // Create a pending promise
+        uint256 promiseId = promiseA.create();
+        
+        // Verify it's pending
+        assertEq(uint8(promiseA.status(promiseId)), uint8(Promise.PromiseStatus.Pending), "Promise should be pending");
+        
+        // Try to share the pending promise - should revert
+        uint256 chainBId = chainIdByForkId[forkIds[1]];
+        vm.expectRevert("Promise: can only share settled promises");
+        promiseA.shareResolvedPromise(chainBId, promiseId);
+    }
+
+    /// @notice Test that sharing resolved promises works
+    function test_CanShareResolvedPromise() public {
+        vm.selectFork(forkIds[0]);
+        
+        // Create and resolve a promise
+        uint256 promiseId = promiseA.create();
+        promiseA.resolve(promiseId, "test data");
+        
+        // Verify it's resolved
+        assertEq(uint8(promiseA.status(promiseId)), uint8(Promise.PromiseStatus.Resolved), "Promise should be resolved");
+        
+        // Share the resolved promise - should work
+        uint256 chainBId = chainIdByForkId[forkIds[1]];
+        promiseA.shareResolvedPromise(chainBId, promiseId);
+        relayAllMessages();
+        
+        // Verify on Chain B
+        vm.selectFork(forkIds[1]);
+        assertTrue(promiseB.exists(promiseId), "Promise should exist on Chain B");
+        assertEq(uint8(promiseB.status(promiseId)), uint8(Promise.PromiseStatus.Resolved), "Promise should be resolved on Chain B");
+    }
+
+    /// @notice Test that sharing rejected promises works
+    function test_CanShareRejectedPromise() public {
+        vm.selectFork(forkIds[0]);
+        
+        // Create and reject a promise
+        uint256 promiseId = promiseA.create();
+        promiseA.reject(promiseId, "test error");
+        
+        // Verify it's rejected
+        assertEq(uint8(promiseA.status(promiseId)), uint8(Promise.PromiseStatus.Rejected), "Promise should be rejected");
+        
+        // Share the rejected promise - should work
+        uint256 chainBId = chainIdByForkId[forkIds[1]];
+        promiseA.shareResolvedPromise(chainBId, promiseId);
+        relayAllMessages();
+        
+        // Verify on Chain B
+        vm.selectFork(forkIds[1]);
+        assertTrue(promiseB.exists(promiseId), "Promise should exist on Chain B");
+        assertEq(uint8(promiseB.status(promiseId)), uint8(Promise.PromiseStatus.Rejected), "Promise should be rejected on Chain B");
     }
 } 
