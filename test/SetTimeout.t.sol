@@ -17,20 +17,21 @@ contract SetTimeoutTest is Test {
     event PromiseResolved(uint256 indexed promiseId, bytes returnData);
 
     function setUp() public {
-        promiseContract = new Promise();
+        promiseContract = new Promise(address(0));
         setTimeout = new SetTimeout(address(promiseContract));
     }
 
     function test_createTimeout() public {
         uint256 futureTimestamp = block.timestamp + 100;
+        uint256 expectedPromiseId = promiseContract.generatePromiseId(1);
         
         vm.prank(alice);
         vm.expectEmit(true, false, false, true);
-        emit TimeoutCreated(1, futureTimestamp);
+        emit TimeoutCreated(expectedPromiseId, futureTimestamp);
         
         uint256 promiseId = setTimeout.create(futureTimestamp);
         
-        assertEq(promiseId, 1, "Promise ID should be 1");
+        assertEq(promiseId, expectedPromiseId, "Promise ID should match expected global ID");
         assertEq(setTimeout.getTimeout(promiseId), futureTimestamp, "Timeout should match");
         assertEq(setTimeout.getRemainingTime(promiseId), 100, "Remaining time should be 100 seconds");
         assertFalse(setTimeout.canResolve(promiseId), "Should not be resolvable yet");
@@ -117,6 +118,8 @@ contract SetTimeoutTest is Test {
     function test_multipleTimeouts() public {
         uint256 timestamp1 = block.timestamp + 50;
         uint256 timestamp2 = block.timestamp + 100;
+        uint256 expectedPromiseId1 = promiseContract.generatePromiseId(1);
+        uint256 expectedPromiseId2 = promiseContract.generatePromiseId(2);
         
         vm.prank(alice);
         uint256 promiseId1 = setTimeout.create(timestamp1);
@@ -124,8 +127,8 @@ contract SetTimeoutTest is Test {
         vm.prank(bob);
         uint256 promiseId2 = setTimeout.create(timestamp2);
         
-        assertEq(promiseId1, 1, "First promise ID should be 1");
-        assertEq(promiseId2, 2, "Second promise ID should be 2");
+        assertEq(promiseId1, expectedPromiseId1, "First promise ID should match expected global ID");
+        assertEq(promiseId2, expectedPromiseId2, "Second promise ID should match expected global ID");
         
         assertEq(setTimeout.getTimeout(promiseId1), timestamp1, "First timeout should match");
         assertEq(setTimeout.getTimeout(promiseId2), timestamp2, "Second timeout should match");

@@ -36,13 +36,14 @@ contract PromiseHarness {
         uint256 resolvableCount = 0;
 
         for (uint256 i = 1; i <= maxPromiseId; i++) {
-            if (!promiseContract.exists(i)) continue;
+            uint256 globalPromiseId = promiseContract.generatePromiseId(i);
+            if (!promiseContract.exists(globalPromiseId)) continue;
 
             for (uint256 j = 0; j < resolvableContracts.length; j++) {
-                if (resolvableContracts[j].canResolve(i)) {
+                if (resolvableContracts[j].canResolve(globalPromiseId)) {
                     resolvablePromises[resolvableCount] = ResolvablePromise({
                         resolvableContract: resolvableContracts[j],
-                        promiseId: i
+                        promiseId: globalPromiseId
                     });
                     resolvableCount++;
                 }
@@ -101,10 +102,11 @@ contract PromiseHarness {
         pendingPromises = 0;
 
         for (uint256 i = 1; i <= maxPromiseId; i++) {
-            if (!promiseContract.exists(i)) continue;
+            uint256 globalPromiseId = promiseContract.generatePromiseId(i);
+            if (!promiseContract.exists(globalPromiseId)) continue;
 
             for (uint256 j = 0; j < resolvableContracts.length; j++) {
-                if (resolvableContracts[j].canResolve(i)) {
+                if (resolvableContracts[j].canResolve(globalPromiseId)) {
                     pendingPromises++;
                     break; // Don't double count if multiple contracts can resolve the same promise
                 }
@@ -126,8 +128,9 @@ contract PromiseHarness {
         statuses = new uint8[](maxPromiseId);
         
         for (uint256 i = 1; i <= maxPromiseId; i++) {
-            if (promiseContract.exists(i)) {
-                statuses[i-1] = uint8(promiseContract.status(i));
+            uint256 globalPromiseId = promiseContract.generatePromiseId(i);
+            if (promiseContract.exists(globalPromiseId)) {
+                statuses[i-1] = uint8(promiseContract.status(globalPromiseId));
             } else {
                 statuses[i-1] = 255; // Non-existent
             }

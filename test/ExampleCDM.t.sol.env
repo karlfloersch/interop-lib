@@ -1,0 +1,134 @@
+// SPDX-License-Identifier: MIT
+pragma solidity 0.8.25;
+
+import {Test} from "forge-std/Test.sol";
+import {console} from "forge-std/console.sol";
+import {Vm} from "forge-std/Vm.sol";
+import {IERC20} from "@openzeppelin-contracts/interfaces/IERC20.sol";
+
+import {Identifier} from "../src/interfaces/IIdentifier.sol";
+import {SuperchainERC20} from "../src/SuperchainERC20.sol";
+import {Relayer} from "../src/test/Relayer.sol";
+import {IPromise} from "../src/interfaces/IPromise.sol";
+import {PredeployAddresses} from "../src/libraries/PredeployAddresses.sol";
+
+contract PromiseTest is Relayer, Test {
+    IPromise public p = IPromise(PredeployAddresses.PROMISE);
+    L2NativeSuperchainERC20 public token;
+
+    event HandlerCalled();
+
+    bool public handlerCalled;
+
+    string[] private rpcUrls = [
+        vm.envOr("CHAIN_A_RPC_URL", string("https://interop-alpha-0.optimism.io")),
+        vm.envOr("CHAIN_B_RPC_URL", string("https://interop-alpha-1.optimism.io"))
+    ];
+
+    constructor() Relayer(rpcUrls) {}
+
+    function setUp() public {
+        vm.selectFork(forkIds[0]);
+        token = new L2NativeSuperchainERC20{salt: bytes32(0)}();
+
+        vm.selectFork(forkIds[1]);
+        new L2NativeSuperchainERC20{salt: bytes32(0)}();
+
+        // mint tokens on chain B
+        token.mint(address(this), 100);
+    }
+
+    modifier async() {
+        require(msg.sender == address(p), "PromiseTest: caller not Promise");
+        _;
+    }
+
+    function test_then_succeeds() public {
+        vm.selectFork(forkIds[0]);
+
+        // context is empty
+        assertEq(p.promiseContext().length, 0);
+        assertEq(p.promiseRelayIdentifier().origin, address(0));
+
+        // example IERC20 remote balanceOf query
+        bytes32 msgHash = p.sendMessage(
+            chainIdByForkId[forkIds[1]], address(token), abi.encodeCall(IERC20.balanceOf, (address(this)))
+        );
+        p.then(msgHash, this.balanceHandler.selector, "abc");
+
+        relayAllMessages();
+
+        relayAllPromises(p, chainIdByForkId[forkIds[0]]);
+
+        assertEq(handlerCalled, true);
+        // context is empty
+        assertEq(p.promiseContext().length, 0);
+        assertEq(p.promiseRelayIdentifier().origin, address(0));
+    }
+
+    function balanceHandler(uint256 balance) public async {
+        handlerCalled = true;
+        require(balance == 100, "PromiseTest: balance mismatch");
+
+        Identifier memory id = p.promiseRelayIdentifier();
+        require(id.origin == address(p), "PromiseTest: origin mismatch");
+
+        bytes memory context = p.promiseContext();
+        require(keccak256(context) == keccak256("abc"), "PromiseTest: context mismatch");
+
+        emit HandlerCalled();
+    }
+}
+
+/// @notice Thrown when attempting to mint or burn tokens and the account is the zero address.
+error ZeroAddress();
+
+/// @title L2NativeSuperchainERC20
+/// @notice Mock implementation of a native Superchain ERC20 token that is L2 native (not backed by an L1 native token).
+/// The mint/burn functionality is intentionally open to ANYONE to make it easier to test with. For production use,
+/// this functionality should be restricted.
+contract L2NativeSuperchainERC20 is SuperchainERC20 {
+    /// @notice Emitted whenever tokens are minted for an account.
+    /// @param account Address of the account tokens are being minted for.
+    /// @param amount  Amount of tokens minted.
+    event Mint(address indexed account, uint256 amount);
+
+    /// @notice Emitted whenever tokens are burned from an account.
+    /// @param account Address of the account tokens are being burned from.
+    /// @param amount  Amount of tokens burned.
+    event Burn(address indexed account, uint256 amount);
+
+    /// @notice Allows ANYONE to mint tokens. For production use, this should be restricted.
+    /// @param _to     Address to mint tokens to.
+    /// @param _amount Amount of tokens to mint.
+    function mint(address _to, uint256 _amount) external virtual {
+        if (_to == address(0)) revert ZeroAddress();
+
+        _mint(_to, _amount);
+
+        emit Mint(_to, _amount);
+    }
+
+    /// @notice Allows ANYONE to burn tokens. For production use, this should be restricted.
+    /// @param _from   Address to burn tokens from.
+    /// @param _amount Amount of tokens to burn.
+    function burn(address _from, uint256 _amount) external virtual {
+        if (_from == address(0)) revert ZeroAddress();
+
+        _burn(_from, _amount);
+
+        emit Burn(_from, _amount);
+    }
+
+    function name() public pure virtual override returns (string memory) {
+        return "L2NativeSuperchainERC20";
+    }
+
+    function symbol() public pure virtual override returns (string memory) {
+        return "MOCK";
+    }
+
+    function decimals() public pure override returns (uint8) {
+        return 18;
+    }
+}

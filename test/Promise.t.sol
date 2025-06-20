@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.25;
+pragma solidity ^0.8.0;
 
 import {Test} from "forge-std/Test.sol";
 import {Promise} from "../src/Promise.sol";
@@ -15,18 +15,19 @@ contract PromiseTest is Test {
     event PromiseRejected(uint256 indexed promiseId, bytes errorData);
 
     function setUp() public {
-        promiseContract = new Promise();
+        promiseContract = new Promise(address(0));
     }
 
     function test_createPromise() public {
-        vm.prank(alice);
+        uint256 expectedId = promiseContract.generateGlobalPromiseId(block.chainid, 1);
         
         vm.expectEmit(true, true, false, true);
-        emit PromiseCreated(1, alice);
+        emit PromiseCreated(expectedId, alice);
         
+        vm.prank(alice);
         uint256 promiseId = promiseContract.create();
         
-        assertEq(promiseId, 1, "First promise should have ID 1");
+        assertEq(promiseId, expectedId, "First promise should have correct global ID");
         
         Promise.PromiseData memory data = promiseContract.getPromise(promiseId);
         assertEq(data.creator, alice, "Creator should be alice");
@@ -44,8 +45,11 @@ contract PromiseTest is Test {
         vm.prank(bob);
         uint256 promiseId2 = promiseContract.create();
         
-        assertEq(promiseId1, 1, "First promise should have ID 1");
-        assertEq(promiseId2, 2, "Second promise should have ID 2");
+        uint256 expectedId1 = promiseContract.generateGlobalPromiseId(block.chainid, 1);
+        uint256 expectedId2 = promiseContract.generateGlobalPromiseId(block.chainid, 2);
+        
+        assertEq(promiseId1, expectedId1, "First promise should have correct global ID");
+        assertEq(promiseId2, expectedId2, "Second promise should have correct global ID");
         
         Promise.PromiseData memory data1 = promiseContract.getPromise(promiseId1);
         Promise.PromiseData memory data2 = promiseContract.getPromise(promiseId2);
@@ -115,14 +119,14 @@ contract PromiseTest is Test {
     function test_cannotResolveNonExistentPromise() public {
         bytes memory returnData = abi.encode(uint256(42));
         
-        vm.expectRevert("Promise: promise does not exist");
+        vm.expectRevert("Promise: only creator can resolve");
         promiseContract.resolve(999, returnData);
     }
 
     function test_cannotRejectNonExistentPromise() public {
         bytes memory errorData = abi.encode("Error");
         
-        vm.expectRevert("Promise: promise does not exist");
+        vm.expectRevert("Promise: only creator can reject");
         promiseContract.reject(999, errorData);
     }
 
@@ -187,13 +191,16 @@ contract PromiseTest is Test {
     }
 
     function test_statusOfNonExistentPromise() public {
-        vm.expectRevert("Promise: promise does not exist");
-        promiseContract.status(999);
+        // Non-existent promises return Pending status (cross-chain compatible behavior)
+        assertEq(uint256(promiseContract.status(999)), uint256(Promise.PromiseStatus.Pending));
     }
 
     function test_getPromiseOfNonExistentPromise() public {
-        vm.expectRevert("Promise: promise does not exist");
-        promiseContract.getPromise(999);
+        // Non-existent promises return empty data (cross-chain compatible behavior)
+        Promise.PromiseData memory data = promiseContract.getPromise(999);
+        assertEq(data.creator, address(0));
+        assertEq(uint256(data.status), uint256(Promise.PromiseStatus.Pending));
+        assertEq(data.returnData.length, 0);
     }
 
     function test_existsReturnsFalseForNonExistentPromise() public {

@@ -19,7 +19,7 @@ contract PromiseHarnessTest is Test {
     event PromisesResolved(uint256 promisesResolved);
 
     function setUp() public {
-        promiseContract = new Promise();
+        promiseContract = new Promise(address(0));
         setTimeoutContract = new SetTimeout(address(promiseContract));
         callbackContract = new Callback(address(promiseContract));
         
