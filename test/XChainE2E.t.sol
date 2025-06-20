@@ -118,13 +118,16 @@ contract XChainE2ETest is Test, Relayer {
         // Fast forward to trigger the first execution
         vm.warp(block.timestamp + 3700); // Slightly past the interval
         
-        // Resolve the timeout that should trigger this cycle (before executing)
+        // Resolve the timeout that should trigger this cycle (this will automatically execute the cycle)
         uint256 triggerTimeoutId = cronScheduler.getNextTimeoutId(cycleId);
         assertTrue(setTimeoutA.canResolve(triggerTimeoutId), "Trigger timeout should be resolvable");
         setTimeoutA.resolve(triggerTimeoutId);
         
-        // Execute the cycle manually (in real deployment, this would be automated)
-        cronScheduler.executeCycle(cycleId);
+        // Resolve the automatic cycle execution callback
+        uint256 executionCallbackId = cronScheduler.getExecutionCallbackId(cycleId);
+        assertTrue(executionCallbackId > 0, "Should have execution callback ID");
+        assertTrue(callbackA.canResolve(executionCallbackId), "Execution callback should be resolvable");
+        callbackA.resolve(executionCallbackId);
         
         // Relay all cross-chain messages for callback registration
         relayAllMessages();
@@ -203,14 +206,19 @@ contract XChainE2ETest is Test, Relayer {
             address(feeBurner)
         );
         
-        // Execute first cycle
+        // Time passes and first cycle triggers automatically
         vm.warp(block.timestamp + 1900);
-        cronScheduler.executeCycle(cycleId);
-        relayAllMessages();
         
-        // Resolve timeout first, then callbacks
-        uint256 timeoutId = cronScheduler.getLastTimeoutId(cycleId);
+        // Resolve the trigger timeout (this will automatically execute the cycle)
+        uint256 timeoutId = cronScheduler.getNextTimeoutId(cycleId);
         setTimeoutA.resolve(timeoutId);
+        
+        // Resolve the automatic cycle execution callback
+        uint256 executionCallbackId = cronScheduler.getExecutionCallbackId(cycleId);
+        assertTrue(executionCallbackId > 0, "Should have execution callback ID");
+        assertTrue(callbackA.canResolve(executionCallbackId), "Execution callback should be resolvable");
+        callbackA.resolve(executionCallbackId);
+        relayAllMessages();
         
         // Share timeout to Chain B for cross-chain callbacks
         promiseA.shareResolvedPromise(chainIdByForkId[forkIds[1]], timeoutId);
@@ -241,15 +249,23 @@ contract XChainE2ETest is Test, Relayer {
         feeCollectorB.simulateAccumulatedFees(300 ether);
         vm.selectFork(forkIds[0]);
         
-        // Execute second cycle
+        // Time passes and second cycle triggers automatically  
         vm.selectFork(forkIds[0]);
         vm.warp(block.timestamp + 1800); // Another 30 minutes
-        cronScheduler.executeCycle(cycleId);
+        
+        // Resolve the next timeout (this will automatically execute the second cycle)
+        uint256 nextTimeoutId = cronScheduler.getNextTimeoutId(cycleId);
+        setTimeoutA.resolve(nextTimeoutId);
+        
+        // Resolve the automatic cycle execution callback for second cycle
+        executionCallbackId = cronScheduler.getExecutionCallbackId(cycleId);
+        assertTrue(executionCallbackId > 0, "Should have execution callback ID for second cycle");
+        assertTrue(callbackA.canResolve(executionCallbackId), "Second cycle execution callback should be resolvable");
+        callbackA.resolve(executionCallbackId);
         relayAllMessages();
         
-        // Resolve timeout first for second cycle
-        timeoutId = cronScheduler.getLastTimeoutId(cycleId);
-        setTimeoutA.resolve(timeoutId);
+        // The timeout that just resolved becomes the "last" timeout for this cycle
+        timeoutId = nextTimeoutId;
         
         // Share timeout to Chain B for cross-chain callbacks
         promiseA.shareResolvedPromise(chainIdByForkId[forkIds[1]], timeoutId);
@@ -324,11 +340,15 @@ contract XChainE2ETest is Test, Relayer {
         
         vm.warp(block.timestamp + 3700);
         
-        // Resolve the timeout that should trigger this cycle (before executing)
+        // Resolve the timeout that should trigger this cycle (this will automatically execute the cycle)
         uint256 triggerTimeoutId = cronScheduler.getNextTimeoutId(cycleId);
         setTimeoutA.resolve(triggerTimeoutId);
         
-        cronScheduler.executeCycle(cycleId);
+        // Resolve the automatic cycle execution callback
+        uint256 executionCallbackId = cronScheduler.getExecutionCallbackId(cycleId);
+        assertTrue(executionCallbackId > 0, "Should have execution callback ID");
+        assertTrue(callbackA.canResolve(executionCallbackId), "Execution callback should be resolvable");
+        callbackA.resolve(executionCallbackId);
         relayAllMessages();
         
         // Share timeout to Chain B for cross-chain callbacks
@@ -598,6 +618,8 @@ contract CronScheduler {
     mapping(uint256 => uint256) public lastPromiseAllIds;
     mapping(uint256 => uint256) public lastBurnCallbackIds;
     mapping(uint256 => uint256) public nextTimeoutIds;
+    mapping(uint256 => uint256) public timeoutToCycle; // Maps timeout ID to cycle ID
+    mapping(uint256 => uint256) public executionCallbackIds; // Maps cycle ID to execution callback ID
     
     uint256 public nextCycleId = 1;
     
@@ -644,6 +666,17 @@ contract CronScheduler {
         uint256 firstTimeoutId = setTimeoutContract.create(block.timestamp + intervalSeconds);
         nextTimeoutIds[cycleId] = firstTimeoutId;
         
+        // Store the timeout-to-cycle mapping for automatic execution
+        timeoutToCycle[firstTimeoutId] = cycleId;
+        
+        // Create callback for automatic first execution
+        uint256 executionCallbackId = callbackContract.then(
+            firstTimeoutId,
+            address(this),
+            CronScheduler.executeCycleCallback.selector
+        );
+        executionCallbackIds[cycleId] = executionCallbackId;
+        
         return cycleId;
     }
     
@@ -679,8 +712,19 @@ contract CronScheduler {
             FeeBurner.burnFees.selector
         );
         
-        // Schedule next execution
+        // **CRON MAGIC**: Schedule next execution automatically
         uint256 nextTimeoutId = setTimeoutContract.create(block.timestamp + cycle.interval);
+        
+        // Store the timeout-to-cycle mapping for automatic execution
+        timeoutToCycle[nextTimeoutId] = cycleId;
+        
+        // **AUTOMATIC TRIGGERING**: Create callback to automatically execute next cycle  
+        uint256 nextExecutionCallbackId = callbackContract.then(
+            nextTimeoutId,
+            address(this),
+            CronScheduler.executeCycleCallback.selector
+        );
+        executionCallbackIds[cycleId] = nextExecutionCallbackId;
         
         // Store promise IDs for tracking
         lastTimeoutIds[cycleId] = nextTimeoutIds[cycleId];
@@ -693,6 +737,26 @@ contract CronScheduler {
         // Update cycle info
         cycle.executionCount++;
         cycle.lastExecution = block.timestamp;
+    }
+    
+    /// @notice Callback wrapper for automatic cycle execution  
+    /// @dev This function is called automatically when timeout resolves
+    function executeCycleCallback(bytes memory /* data */) external returns (string memory) {
+        // Find which cycle needs to be executed by checking which timeout is resolved
+        // but hasn't been processed yet (executionCount hasn't been incremented)
+        for (uint256 cycleId = 1; cycleId < nextCycleId; cycleId++) {
+            if (!cycles[cycleId].active) continue;
+            
+            uint256 timeoutId = nextTimeoutIds[cycleId];
+            if (timeoutId > 0 && 
+                promiseContract.status(timeoutId) == Promise.PromiseStatus.Resolved &&
+                (cycles[cycleId].lastExecution == 0 || block.timestamp >= cycles[cycleId].lastExecution + cycles[cycleId].interval)) {
+                // This timeout resolved and cycle is ready
+                this.executeCycle(cycleId);
+                return "Cycle executed automatically";
+            }
+        }
+        return "No cycles ready for execution";
     }
     
     function stopCycle(uint256 cycleId) external {
@@ -725,5 +789,9 @@ contract CronScheduler {
     
     function getNextTimeoutId(uint256 cycleId) external view returns (uint256) {
         return nextTimeoutIds[cycleId];
+    }
+    
+    function getExecutionCallbackId(uint256 cycleId) external view returns (uint256) {
+        return executionCallbackIds[cycleId];
     }
 } 

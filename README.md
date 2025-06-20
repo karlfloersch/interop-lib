@@ -126,7 +126,7 @@ uint256 promiseAllId = promiseAllContract.create(promises);
 
 ### Periodic Fee Collection and Burning (Cron Job Pattern)
 
-The `test_PeriodicFeeCollectionAndBurning` test demonstrates a complete cross-chain automated fee collection and burning system that operates like a cron job:
+The `test_PeriodicFeeCollectionAndBurning` test demonstrates a complete cross-chain automated fee collection and burning system that operates like a truly automatic cron job - once started, it runs perpetually without any manual intervention:
 
 #### Architecture Overview
 - **CronScheduler** contract orchestrates the recurring workflow
@@ -137,17 +137,17 @@ The `test_PeriodicFeeCollectionAndBurning` test demonstrates a complete cross-ch
 - **Automatic scheduling** creates the next cycle timeout
 
 #### Flow Summary
-1. **Initialize cycle**: `startPeriodicFeeCollection()` sets up recurring 1-hour intervals
-2. **Trigger execution**: After 1 hour passes, `executeCycle()` is called
+1. **Initialize cycle**: `startPeriodicFeeCollection()` sets up recurring 1-hour intervals with automatic execution
+2. **Automatic triggering**: After 1 hour passes, timeout callback automatically calls `executeCycle()`
 3. **Fee collection setup**: Creates callbacks to collect fees from Chain A and Chain B
 4. **Aggregation setup**: Uses PromiseAll to wait for both fee collections
 5. **Burn setup**: Registers callback to burn fees when aggregation completes
-6. **Schedule next cycle**: Automatically creates timeout for next hour
+6. **Schedule next cycle**: Automatically creates timeout and callback for next hour
 7. **Resolution cascade**: 
-   - Timeout resolves → Fee collection callbacks execute
-   - Fee collections complete → PromiseAll resolves  
+   - Timeout resolves → Execution callback triggers → `executeCycle()` runs automatically
+   - Fee collection callbacks execute → PromiseAll resolves  
    - PromiseAll resolves → Burn callback executes
-   - System automatically schedules next cycle
+   - System perpetually schedules and executes next cycle
 
 #### 1. Initial Setup
 
@@ -196,24 +196,54 @@ function executeCycle(uint256 cycleId) external {
         FeeBurner.burnFees.selector
     );
     
-    // **CRON MAGIC**: Schedule next execution automatically
-    uint256 nextTimeoutId = setTimeoutContract.create(block.timestamp + cycle.interval);
-    nextTimeoutIds[cycleId] = nextTimeoutId;
+            // **CRON MAGIC**: Schedule next execution automatically
+        uint256 nextTimeoutId = setTimeoutContract.create(block.timestamp + cycle.interval);
+        
+        // **AUTOMATIC TRIGGERING**: Create callback to automatically execute next cycle
+        uint256 nextExecutionCallbackId = callbackContract.then(
+            nextTimeoutId,
+            address(this),
+            CronScheduler.executeCycleCallback.selector
+        );
+        executionCallbackIds[cycleId] = nextExecutionCallbackId;
+        
+        nextTimeoutIds[cycleId] = nextTimeoutId;
+}
+
+/// @notice Callback wrapper for automatic cycle execution  
+/// @dev This function is called automatically when timeout resolves
+function executeCycleCallback(bytes memory /* data */) external returns (string memory) {
+    // Find which cycle needs to be executed by checking which timeout is resolved
+    for (uint256 cycleId = 1; cycleId < nextCycleId; cycleId++) {
+        if (!cycles[cycleId].active) continue;
+        
+        uint256 timeoutId = nextTimeoutIds[cycleId];
+        if (timeoutId > 0 && 
+            promiseContract.status(timeoutId) == Promise.PromiseStatus.Resolved &&
+            (cycles[cycleId].lastExecution == 0 || 
+             block.timestamp >= cycles[cycleId].lastExecution + cycles[cycleId].interval)) {
+            // This timeout resolved and cycle is ready
+            this.executeCycle(cycleId);
+            return "Cycle executed automatically";
+        }
+    }
+    return "No cycles ready for execution";
 }
 ```
 
 #### 3. Execution Flow
 
 ```solidity
-// Time passes and timeout becomes resolvable
+// Time passes and cycle triggers automatically
 vm.warp(block.timestamp + 3700);
 
-// Resolve the trigger timeout
+// Resolve the trigger timeout (this will automatically execute the cycle)
 uint256 triggerTimeoutId = cronScheduler.getNextTimeoutId(cycleId);
 setTimeoutA.resolve(triggerTimeoutId);
 
-// Execute the cycle (sets up all callbacks and next timeout)
-cronScheduler.executeCycle(cycleId);
+// Resolve the automatic cycle execution callback
+uint256 executionCallbackId = cronScheduler.getExecutionCallbackId(cycleId);
+callbackA.resolve(executionCallbackId);
 
 // Share timeout to Chain B so cross-chain callbacks can execute
 promiseA.shareResolvedPromise(chainBId, triggerTimeoutId);
@@ -260,7 +290,8 @@ assertTrue(nextTimeoutId > 0, "Next timeout scheduled");
 
 #### Key Architecture Features
 
-- **Automatic Self-Scheduling**: Each cycle schedules the next execution
+- **Fully Automatic Execution**: Each cycle creates a callback that automatically triggers the next execution when the timeout resolves
+- **Self-Perpetuating**: Once started, cycles continue indefinitely without manual intervention
 - **Cross-Chain Coordination**: Seamlessly orchestrates operations across multiple chains
 - **Fail-Safe Aggregation**: Uses PromiseAll to ensure all collections complete before burning
 - **State Management**: Tracks cycle state, execution count, and promise relationships
