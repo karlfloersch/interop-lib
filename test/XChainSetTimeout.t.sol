@@ -9,9 +9,9 @@ import {SetTimeout} from "../src/SetTimeout.sol";
 import {Callback} from "../src/Callback.sol";
 import {PredeployAddresses} from "../src/libraries/PredeployAddresses.sol";
 
-/// @title SetTimeoutCrossChain
+/// @title XChainSetTimeout
 /// @notice Tests for cross-chain SetTimeout functionality where timeouts created on one chain are referenced from another
-contract SetTimeoutCrossChainTest is Test, Relayer {
+contract XChainSetTimeoutTest is Test, Relayer {
     // Contracts on each chain
     Promise public promiseA;
     Promise public promiseB;
