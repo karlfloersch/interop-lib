@@ -54,8 +54,6 @@ contract Callback is IResolvable {
     /// @param selector The function selector to call
     /// @return callbackPromiseId The ID of the created callback promise
     function then(uint256 parentPromiseId, address target, bytes4 selector) external returns (uint256 callbackPromiseId) {
-        require(promiseContract.exists(parentPromiseId), "Callback: parent promise does not exist");
-        
         // Create a new promise for this callback
         callbackPromiseId = promiseContract.create();
         
@@ -76,8 +74,6 @@ contract Callback is IResolvable {
     /// @param selector The function selector to call
     /// @return callbackPromiseId The ID of the created callback promise
     function onReject(uint256 parentPromiseId, address target, bytes4 selector) external returns (uint256 callbackPromiseId) {
-        require(promiseContract.exists(parentPromiseId), "Callback: parent promise does not exist");
-        
         // Create a new promise for this callback
         callbackPromiseId = promiseContract.create();
         
@@ -101,7 +97,6 @@ contract Callback is IResolvable {
     function thenOn(uint256 destinationChain, uint256 parentPromiseId, address target, bytes4 selector) external returns (uint256 callbackPromiseId) {
         require(address(messenger) != address(0), "Callback: cross-chain not enabled");
         require(destinationChain != currentChainId, "Callback: cannot register callback on same chain");
-        require(promiseContract.exists(parentPromiseId), "Callback: parent promise does not exist");
         
         // Create a new promise for this callback
         callbackPromiseId = promiseContract.create();
@@ -133,7 +128,6 @@ contract Callback is IResolvable {
     function onRejectOn(uint256 destinationChain, uint256 parentPromiseId, address target, bytes4 selector) external returns (uint256 callbackPromiseId) {
         require(address(messenger) != address(0), "Callback: cross-chain not enabled");
         require(destinationChain != currentChainId, "Callback: cannot register callback on same chain");
-        require(promiseContract.exists(parentPromiseId), "Callback: parent promise does not exist");
         
         // Create a new promise for this callback
         callbackPromiseId = promiseContract.create();
