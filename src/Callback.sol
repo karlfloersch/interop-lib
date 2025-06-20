@@ -3,12 +3,19 @@ pragma solidity 0.8.25;
 
 import {Promise} from "./Promise.sol";
 import {IResolvable} from "./interfaces/IResolvable.sol";
+import {IL2ToL2CrossDomainMessenger} from "./interfaces/IL2ToL2CrossDomainMessenger.sol";
 
 /// @title Callback
 /// @notice Callback promise contract that implements .then() and .catch() functionality
 contract Callback is IResolvable {
     /// @notice The Promise contract instance
     Promise public immutable promiseContract;
+    
+    /// @notice Cross-domain messenger for sending cross-chain messages (optional)
+    IL2ToL2CrossDomainMessenger public immutable messenger;
+    
+    /// @notice Current chain ID for generating global promise IDs (optional)
+    uint256 public immutable currentChainId;
 
     /// @notice Callback types for handling different promise states
     enum CallbackType {
@@ -34,8 +41,11 @@ contract Callback is IResolvable {
     event CallbackExecuted(uint256 indexed callbackPromiseId, bool success, bytes returnData);
 
     /// @param _promiseContract The address of the Promise contract
-    constructor(address _promiseContract) {
+    /// @param _messenger The cross-domain messenger contract address (use address(0) for local-only mode)
+    constructor(address _promiseContract, address _messenger) {
         promiseContract = Promise(_promiseContract);
+        messenger = IL2ToL2CrossDomainMessenger(_messenger);
+        currentChainId = block.chainid;
     }
 
     /// @notice Create a .then() callback that executes when the parent promise resolves
@@ -80,6 +90,98 @@ contract Callback is IResolvable {
         });
         
         emit CallbackRegistered(callbackPromiseId, parentPromiseId, CallbackType.Catch);
+    }
+
+    /// @notice Create a cross-chain .then() callback that executes on another chain when the parent promise resolves
+    /// @param destinationChain The chain ID where the callback should execute
+    /// @param parentPromiseId The ID of the parent promise to watch
+    /// @param target The contract address to call when parent resolves
+    /// @param selector The function selector to call
+    /// @return callbackPromiseId The ID of the created callback promise
+    function thenOn(uint256 destinationChain, uint256 parentPromiseId, address target, bytes4 selector) external returns (uint256 callbackPromiseId) {
+        require(address(messenger) != address(0), "Callback: cross-chain not enabled");
+        require(destinationChain != currentChainId, "Callback: cannot register callback on same chain");
+        require(promiseContract.exists(parentPromiseId), "Callback: parent promise does not exist");
+        
+        // Create a new promise for this callback
+        callbackPromiseId = promiseContract.create();
+        
+        // Transfer resolution rights to destination chain
+        promiseContract.transferResolve(callbackPromiseId, destinationChain, address(this));
+        
+        // Send cross-chain message to register callback on destination chain
+        bytes memory message = abi.encodeWithSignature(
+            "receiveCallbackRegistration(uint256,uint256,address,bytes4,uint8)",
+            callbackPromiseId,
+            parentPromiseId, 
+            target,
+            selector,
+            uint8(CallbackType.Then)
+        );
+        
+        messenger.sendMessage(destinationChain, address(this), message);
+        
+        emit CallbackRegistered(callbackPromiseId, parentPromiseId, CallbackType.Then);
+    }
+
+    /// @notice Create a cross-chain .catch() callback that executes on another chain when the parent promise rejects
+    /// @param destinationChain The chain ID where the callback should execute
+    /// @param parentPromiseId The ID of the parent promise to watch
+    /// @param target The contract address to call when parent rejects
+    /// @param selector The function selector to call
+    /// @return callbackPromiseId The ID of the created callback promise
+    function onRejectOn(uint256 destinationChain, uint256 parentPromiseId, address target, bytes4 selector) external returns (uint256 callbackPromiseId) {
+        require(address(messenger) != address(0), "Callback: cross-chain not enabled");
+        require(destinationChain != currentChainId, "Callback: cannot register callback on same chain");
+        require(promiseContract.exists(parentPromiseId), "Callback: parent promise does not exist");
+        
+        // Create a new promise for this callback
+        callbackPromiseId = promiseContract.create();
+        
+        // Transfer resolution rights to destination chain
+        promiseContract.transferResolve(callbackPromiseId, destinationChain, address(this));
+        
+        // Send cross-chain message to register callback on destination chain
+        bytes memory message = abi.encodeWithSignature(
+            "receiveCallbackRegistration(uint256,uint256,address,bytes4,uint8)",
+            callbackPromiseId,
+            parentPromiseId,
+            target, 
+            selector,
+            uint8(CallbackType.Catch)
+        );
+        
+        messenger.sendMessage(destinationChain, address(this), message);
+        
+        emit CallbackRegistered(callbackPromiseId, parentPromiseId, CallbackType.Catch);
+    }
+
+    /// @notice Receive callback registration from another chain
+    /// @param callbackPromiseId The global callback promise ID
+    /// @param parentPromiseId The parent promise ID to watch  
+    /// @param target The contract address to call when parent settles
+    /// @param selector The function selector to call
+    /// @param callbackType The type of callback (Then or Catch)
+    function receiveCallbackRegistration(
+        uint256 callbackPromiseId,
+        uint256 parentPromiseId,
+        address target,
+        bytes4 selector,
+        uint8 callbackType
+    ) external {
+        // Verify the message comes from another Callback contract via cross-domain messenger
+        require(msg.sender == address(messenger), "Callback: only messenger can call");
+        require(messenger.crossDomainMessageSender() == address(this), "Callback: only from Callback contract");
+        
+        // Store the callback data locally
+        callbacks[callbackPromiseId] = CallbackData({
+            parentPromiseId: parentPromiseId,
+            target: target,
+            selector: selector,
+            callbackType: CallbackType(callbackType)
+        });
+        
+        emit CallbackRegistered(callbackPromiseId, parentPromiseId, CallbackType(callbackType));
     }
 
     /// @notice Resolve a callback promise by executing the callback if conditions are met

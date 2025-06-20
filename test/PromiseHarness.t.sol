@@ -21,7 +21,7 @@ contract PromiseHarnessTest is Test {
     function setUp() public {
         promiseContract = new Promise(address(0));
         setTimeoutContract = new SetTimeout(address(promiseContract));
-        callbackContract = new Callback(address(promiseContract));
+        callbackContract = new Callback(address(promiseContract), address(0));
         
         address[] memory resolvableContracts = new address[](2);
         resolvableContracts[0] = address(setTimeoutContract);
