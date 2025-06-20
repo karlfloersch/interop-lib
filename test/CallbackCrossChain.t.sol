@@ -88,7 +88,7 @@ contract CallbackCrossChainTest is Test, Relayer {
         promiseA.resolve(parentPromiseId, abi.encode("Test data"));
         
         // Share resolved promise to Chain B
-        promiseA.sharePromise(chainBId, parentPromiseId);
+        promiseA.shareResolvedPromise(chainBId, parentPromiseId);
         
         // Relay the share message to Chain B
         relayAllMessages();
@@ -145,7 +145,7 @@ contract CallbackCrossChainTest is Test, Relayer {
         promiseA.reject(parentPromiseId, abi.encode("Test error"));
         
         // Share rejected promise to Chain B
-        promiseA.sharePromise(chainBId, parentPromiseId);
+        promiseA.shareResolvedPromise(chainBId, parentPromiseId);
         
         // Relay the share message to Chain B
         relayAllMessages();
@@ -192,7 +192,7 @@ contract CallbackCrossChainTest is Test, Relayer {
         promiseA.reject(parentPromiseId, abi.encode("Test error"));
         
         // Share rejected promise to Chain B
-        promiseA.sharePromise(chainBId, parentPromiseId);
+        promiseA.shareResolvedPromise(chainBId, parentPromiseId);
         relayAllMessages();
         
         // Execute callback on Chain B (should reject callback since parent was rejected)
@@ -243,7 +243,7 @@ contract CallbackCrossChainTest is Test, Relayer {
         
         // Resolve parent promise and share to Chain B
         promiseA.resolve(parentPromiseId, abi.encode("Shared data"));
-        promiseA.sharePromise(chainBId, parentPromiseId);
+        promiseA.shareResolvedPromise(chainBId, parentPromiseId);
         relayAllMessages();
         
         // Execute both callbacks on Chain B

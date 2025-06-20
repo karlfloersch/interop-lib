@@ -41,8 +41,8 @@ contract Promise {
     /// @notice Event emitted when a promise is rejected
     event PromiseRejected(uint256 indexed promiseId, bytes errorData);
 
-    /// @notice Event emitted when a promise is shared to another chain
-    event PromiseShared(uint256 indexed promiseId, uint256 indexed destinationChain);
+    /// @notice Event emitted when a resolved promise is shared to another chain
+    event ResolvedPromiseShared(uint256 indexed promiseId, uint256 indexed destinationChain);
 
     /// @notice Event emitted when resolution is transferred to another chain
     event ResolutionTransferred(uint256 indexed promiseId, uint256 indexed destinationChain, address indexed newResolver);
@@ -141,14 +141,15 @@ contract Promise {
         return nextPromiseId;
     }
 
-    /// @notice Share a promise with its current state to another chain
-    /// @param destinationChain The chain ID to share the promise with
+    /// @notice Share a resolved promise with its current state to another chain
+    /// @param destinationChain The chain ID to share the resolved promise with
     /// @param promiseId The ID of the promise to share
-    function sharePromise(uint256 destinationChain, uint256 promiseId) external {
+    function shareResolvedPromise(uint256 destinationChain, uint256 promiseId) external {
         require(address(messenger) != address(0), "Promise: cross-chain not enabled");
         require(destinationChain != currentChainId, "Promise: cannot share to same chain");
         
         PromiseData memory promiseData = promises[promiseId];
+        require(promiseData.status != PromiseStatus.Pending, "Promise: can only share settled promises");
         
         // Encode the call to receiveSharedPromise
         bytes memory message = abi.encodeWithSignature(
@@ -162,7 +163,7 @@ contract Promise {
         // Send cross-chain message
         messenger.sendMessage(destinationChain, address(this), message);
         
-        emit PromiseShared(promiseId, destinationChain);
+        emit ResolvedPromiseShared(promiseId, destinationChain);
     }
 
     /// @notice Transfer resolution rights of a promise to another chain
