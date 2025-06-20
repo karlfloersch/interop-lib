@@ -2,7 +2,8 @@
 
 A Solidity implementation of JavaScript-style promises for cross-chain and local asynchronous operations.
 
-### **📊 Core Implementation: 426 lines of code** (Promise: 130, Callback: 150, PromiseAll: 99, SetTimeout: 47)
+### **📊 Core Implementation: 426 lines of code** 
+Promise: 130, Callback: 150, PromiseAll: 99, SetTimeout: 47
 
 ## Overview
 
