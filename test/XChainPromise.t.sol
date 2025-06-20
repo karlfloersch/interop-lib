@@ -7,9 +7,9 @@ import {Relayer} from "../src/test/Relayer.sol";
 import {Promise} from "../src/Promise.sol";
 import {PredeployAddresses} from "../src/libraries/PredeployAddresses.sol";
 
-/// @title PromiseCrossChain
+/// @title XChainPromise
 /// @notice Focused tests for Promise.sol cross-chain functionality
-contract PromiseCrossChainTest is Test, Relayer {
+contract XChainPromiseTest is Test, Relayer {
     // Promise contracts
     Promise public promiseA;
     Promise public promiseB;

@@ -8,9 +8,9 @@ import {Promise} from "../src/Promise.sol";
 import {Callback} from "../src/Callback.sol";
 import {PredeployAddresses} from "../src/libraries/PredeployAddresses.sol";
 
-/// @title CallbackCrossChain
+/// @title XChainCallback
 /// @notice Tests for cross-chain callback functionality
-contract CallbackCrossChainTest is Test, Relayer {
+contract XChainCallbackTest is Test, Relayer {
     // Contracts on each chain
     Promise public promiseA;
     Promise public promiseB;

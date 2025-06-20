@@ -9,9 +9,9 @@ import {PromiseAll} from "../src/PromiseAll.sol";
 import {Callback} from "../src/Callback.sol";
 import {PredeployAddresses} from "../src/libraries/PredeployAddresses.sol";
 
-/// @title PromiseAllCrossChain
+/// @title XChainPromiseAll
 /// @notice Tests for cross-chain PromiseAll functionality where PromiseAll aggregates promises from multiple chains
-contract PromiseAllCrossChainTest is Test, Relayer {
+contract XChainPromiseAllTest is Test, Relayer {
     // Contracts on each chain
     Promise public promiseA;
     Promise public promiseB;
