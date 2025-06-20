@@ -2,10 +2,11 @@
 pragma solidity 0.8.25;
 
 import {Promise} from "./Promise.sol";
+import {IResolvable} from "./interfaces/IResolvable.sol";
 
 /// @title Callback
 /// @notice Callback promise contract that implements .then() and .catch() functionality
-contract Callback {
+contract Callback is IResolvable {
     /// @notice The Promise contract instance
     Promise public immutable promiseContract;
 

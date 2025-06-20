@@ -23,10 +23,14 @@ contract E2ETest is Test {
         promiseContract = new Promise();
         setTimeoutContract = new SetTimeout(address(promiseContract));
         callbackContract = new Callback(address(promiseContract));
+        
+        address[] memory resolvableContracts = new address[](2);
+        resolvableContracts[0] = address(setTimeoutContract);
+        resolvableContracts[1] = address(callbackContract);
+        
         harness = new PromiseHarness(
             address(promiseContract),
-            address(setTimeoutContract), 
-            address(callbackContract)
+            resolvableContracts
         );
     }
 
@@ -48,9 +52,8 @@ contract E2ETest is Test {
         uint256 callback2 = callbackContract.then(timeoutPromise, address(target2), target2.onTimeout.selector);
         
         // 3. Initially, nothing should be resolvable
-        (uint256 pendingTimeouts, uint256 pendingCallbacks) = harness.countPendingAuto();
-        assertEq(pendingTimeouts, 0, "No timeouts ready yet");
-        assertEq(pendingCallbacks, 0, "No callbacks ready yet");
+        uint256 pendingPromises = harness.countPendingAuto();
+        assertEq(pendingPromises, 0, "No promises ready yet");
         
         // All promises should be pending
         assertEq(uint256(promiseContract.status(timeoutPromise)), uint256(Promise.PromiseStatus.Pending), "Timeout promise should be pending");
@@ -60,14 +63,16 @@ contract E2ETest is Test {
         // 4. Fast forward time to make timeout resolvable
         vm.warp(block.timestamp + 150);
         
-        (pendingTimeouts, pendingCallbacks) = harness.countPendingAuto();
-        assertEq(pendingTimeouts, 1, "Should have 1 resolvable timeout");
-        assertEq(pendingCallbacks, 0, "No callbacks ready until timeout resolves");
+        pendingPromises = harness.countPendingAuto();
+        assertEq(pendingPromises, 1, "Should have 1 resolvable promise");
         
-        // 5. Use harness to auto-resolve everything
-        (uint256 timeoutsResolved, uint256 callbacksResolved) = harness.resolveAllPendingAuto();
-        assertEq(timeoutsResolved, 1, "Should resolve 1 timeout");
-        assertEq(callbacksResolved, 2, "Should resolve 2 callbacks");
+        // 5. Use harness to auto-resolve everything (first layer)
+        uint256 promisesResolved = harness.resolveAllPendingAuto();
+        assertEq(promisesResolved, 1, "Should resolve 1 promise (timeout)");
+        
+        // 6. Resolve second layer (callbacks)
+        promisesResolved = harness.resolveAllPendingAuto();
+        assertEq(promisesResolved, 2, "Should resolve 2 callbacks");
         
         // 6. Verify final state
         assertEq(uint256(promiseContract.status(timeoutPromise)), uint256(Promise.PromiseStatus.Resolved), "Timeout promise should be resolved");
@@ -81,9 +86,8 @@ contract E2ETest is Test {
         assertEq(target2.receivedData(), "", "Target 2 should receive empty data from timeout");
         
         // 8. No more pending promises
-        (pendingTimeouts, pendingCallbacks) = harness.countPendingAuto();
-        assertEq(pendingTimeouts, 0, "No pending timeouts");
-        assertEq(pendingCallbacks, 0, "No pending callbacks");
+        pendingPromises = harness.countPendingAuto();
+        assertEq(pendingPromises, 0, "No pending promises");
     }
 
     /// @notice Test chaining callbacks - callback returns another promise
@@ -101,7 +105,8 @@ contract E2ETest is Test {
         
         // 3. Fast forward and resolve initial timeout
         vm.warp(block.timestamp + 150);
-        harness.resolveAllPendingAuto();
+        harness.resolveAllPendingAuto(); // Resolve timeout
+        harness.resolveAllPendingAuto(); // Resolve callback (chainTarget)
         
         // 4. ChainTarget should have been called and created a new promise
         assertTrue(chainTarget.called(), "Chain target should have been called");
@@ -154,7 +159,8 @@ contract E2ETest is Test {
         
         // After 60 seconds - only timeout1 should resolve
         vm.warp(block.timestamp + 60);
-        harness.resolveAllPendingAuto();
+        harness.resolveAllPendingAuto(); // Resolve timeout1
+        harness.resolveAllPendingAuto(); // Resolve callback on timeout1
         
         assertTrue(target1.called(), "Target 1 should be called after 60s");
         assertFalse(target2.called(), "Target 2 should not be called yet");
@@ -162,7 +168,8 @@ contract E2ETest is Test {
         
         // After 110 seconds - timeout2 should also resolve
         vm.warp(block.timestamp + 50);
-        harness.resolveAllPendingAuto();
+        harness.resolveAllPendingAuto(); // Resolve timeout2
+        harness.resolveAllPendingAuto(); // Resolve callback on timeout2
         
         assertTrue(target1.called(), "Target 1 should still be called");
         assertTrue(target2.called(), "Target 2 should now be called");
@@ -170,7 +177,8 @@ contract E2ETest is Test {
         
         // After 160 seconds - timeout3 should resolve
         vm.warp(block.timestamp + 50);
-        harness.resolveAllPendingAuto();
+        harness.resolveAllPendingAuto(); // Resolve timeout3
+        harness.resolveAllPendingAuto(); // Resolve callback on timeout3
         
         assertTrue(target1.called(), "Target 1 should still be called");
         assertTrue(target2.called(), "Target 2 should still be called");
@@ -201,7 +209,8 @@ contract E2ETest is Test {
         
         // Resolve timeout first
         vm.warp(block.timestamp + 150);
-        harness.resolveAllPendingAuto();
+        harness.resolveAllPendingAuto(); // Resolve timeout
+        harness.resolveAllPendingAuto(); // Resolve callbacks (failing and normal)
         
         // Check states
         assertEq(uint256(promiseContract.status(timeoutPromise)), uint256(Promise.PromiseStatus.Resolved), "Timeout should be resolved");
@@ -258,9 +267,12 @@ contract E2ETest is Test {
         
         // 5. Fast forward to resolve short timeout
         vm.warp(block.timestamp + 60);
-        (uint256 timeoutsResolved, uint256 callbacksResolved) = harness.resolveAllPendingAuto();
-        assertEq(timeoutsResolved, 1, "Should resolve short timeout");
-        assertEq(callbacksResolved, 2, "Should resolve callbacks on short timeout");
+        uint256 promisesResolved = harness.resolveAllPendingAuto();
+        assertEq(promisesResolved, 1, "Should resolve short timeout");
+        
+        // Resolve callbacks in second layer
+        promisesResolved = harness.resolveAllPendingAuto();
+        assertEq(promisesResolved, 2, "Should resolve callbacks on short timeout");
         
         // 6. Check intermediate state
         assertTrue(target1.called(), "Simple target should be called");
@@ -284,12 +296,12 @@ contract E2ETest is Test {
         
         // 10. Fast forward to resolve long timeout
         vm.warp(block.timestamp + 160);
-        harness.resolveAllPendingAuto();
+        harness.resolveAllPendingAuto(); // Resolve long timeout
+        harness.resolveAllPendingAuto(); // Resolve callback on long timeout
         
         // 11. Verify everything is resolved
-        (uint256 pendingTimeouts, uint256 pendingCallbacks) = harness.countPendingAuto();
-        assertEq(pendingTimeouts, 0, "No pending timeouts at end");
-        assertEq(pendingCallbacks, 0, "No pending callbacks at end");
+        uint256 pendingPromises = harness.countPendingAuto();
+        assertEq(pendingPromises, 0, "No pending promises at end");
         
         // This test demonstrates:
         // - Multiple timeouts with different delays
@@ -310,6 +322,8 @@ contract SimpleTarget {
         called = true;
         if (data.length > 0) {
             receivedData = abi.decode(data, (string));
+        } else {
+            receivedData = ""; // Handle empty data from SetTimeout
         }
         return "timeout handled";
     }

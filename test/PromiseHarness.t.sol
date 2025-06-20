@@ -16,16 +16,20 @@ contract PromiseHarnessTest is Test {
     address public alice = address(0x1);
     address public bob = address(0x2);
 
-    event PromisesResolved(uint256 timeoutsResolved, uint256 callbacksResolved);
+    event PromisesResolved(uint256 promisesResolved);
 
     function setUp() public {
         promiseContract = new Promise();
         setTimeoutContract = new SetTimeout(address(promiseContract));
         callbackContract = new Callback(address(promiseContract));
+        
+        address[] memory resolvableContracts = new address[](2);
+        resolvableContracts[0] = address(setTimeoutContract);
+        resolvableContracts[1] = address(callbackContract);
+        
         harness = new PromiseHarness(
             address(promiseContract),
-            address(setTimeoutContract), 
-            address(callbackContract)
+            resolvableContracts
         );
     }
 
@@ -38,24 +42,21 @@ contract PromiseHarnessTest is Test {
         uint256 timeout2 = setTimeoutContract.create(block.timestamp + 200);
         
         // Check pending count
-        (uint256 pendingTimeouts, uint256 pendingCallbacks) = harness.countPendingAuto();
-        assertEq(pendingTimeouts, 0, "Should be 0 pending timeouts before time passes");
-        assertEq(pendingCallbacks, 0, "Should be 0 pending callbacks");
+        uint256 pendingPromises = harness.countPendingAuto();
+        assertEq(pendingPromises, 0, "Should be 0 pending promises before time passes");
         
         // Fast forward past first timeout
         vm.warp(block.timestamp + 150);
         
-        (pendingTimeouts, pendingCallbacks) = harness.countPendingAuto();
-        assertEq(pendingTimeouts, 1, "Should be 1 pending timeout");
-        assertEq(pendingCallbacks, 0, "Should be 0 pending callbacks");
+        pendingPromises = harness.countPendingAuto();
+        assertEq(pendingPromises, 1, "Should be 1 pending promise");
         
-        // Resolve pending promises
+        // Resolve pending promises (first layer - timeouts only)
         vm.expectEmit(false, false, false, true);
-        emit PromisesResolved(1, 0);
+        emit PromisesResolved(1);
         
-        (uint256 timeoutsResolved, uint256 callbacksResolved) = harness.resolveAllPendingAuto();
-        assertEq(timeoutsResolved, 1, "Should resolve 1 timeout");
-        assertEq(callbacksResolved, 0, "Should resolve 0 callbacks");
+        uint256 promisesResolved = harness.resolveAllPendingAuto();
+        assertEq(promisesResolved, 1, "Should resolve 1 promise");
         
         // Check timeout1 is resolved, timeout2 is still pending
         assertEq(uint256(promiseContract.status(timeout1)), uint256(Promise.PromiseStatus.Resolved), "Timeout1 should be resolved");
@@ -63,8 +64,8 @@ contract PromiseHarnessTest is Test {
         
         // Fast forward past second timeout and resolve
         vm.warp(block.timestamp + 100);
-        (timeoutsResolved, callbacksResolved) = harness.resolveAllPendingAuto();
-        assertEq(timeoutsResolved, 1, "Should resolve 1 more timeout");
+        promisesResolved = harness.resolveAllPendingAuto();
+        assertEq(promisesResolved, 1, "Should resolve 1 more promise");
         
         assertEq(uint256(promiseContract.status(timeout2)), uint256(Promise.PromiseStatus.Resolved), "Timeout2 should be resolved");
     }
@@ -83,23 +84,20 @@ contract PromiseHarnessTest is Test {
         uint256 callback2 = callbackContract.onReject(parentPromise, address(target), target.handleError.selector);
         
         // Check pending count
-        (uint256 pendingTimeouts, uint256 pendingCallbacks) = harness.countPendingAuto();
-        assertEq(pendingTimeouts, 0, "Should be 0 pending timeouts");
-        assertEq(pendingCallbacks, 0, "Should be 0 pending callbacks (parent not settled)");
+        uint256 pendingPromises = harness.countPendingAuto();
+        assertEq(pendingPromises, 0, "Should be 0 pending promises (parent not settled)");
         
         // Resolve parent promise
         vm.prank(alice);
         promiseContract.resolve(parentPromise, abi.encode(uint256(42)));
         
-        // Now callback1 should be resolvable, callback2 should not
-        (pendingTimeouts, pendingCallbacks) = harness.countPendingAuto();
-        assertEq(pendingTimeouts, 0, "Should be 0 pending timeouts");
-        assertEq(pendingCallbacks, 2, "Should be 2 resolvable callbacks"); // Both can be resolved (then executes, catch rejects)
+        // Now callbacks should be resolvable
+        pendingPromises = harness.countPendingAuto();
+        assertEq(pendingPromises, 2, "Should be 2 resolvable callbacks"); // Both can be resolved (then executes, catch rejects)
         
         // Resolve callbacks
-        (uint256 timeoutsResolved, uint256 callbacksResolved) = harness.resolveAllPendingAuto();
-        assertEq(timeoutsResolved, 0, "Should resolve 0 timeouts");
-        assertEq(callbacksResolved, 2, "Should resolve 2 callbacks");
+        uint256 promisesResolved = harness.resolveAllPendingAuto();
+        assertEq(promisesResolved, 2, "Should resolve 2 callbacks");
         
         // Check results
         assertEq(uint256(promiseContract.status(callback1)), uint256(Promise.PromiseStatus.Resolved), "Then callback should be resolved");
@@ -111,9 +109,8 @@ contract PromiseHarnessTest is Test {
 
     function test_countPending() public {
         // Initially no pending promises
-        (uint256 pendingTimeouts, uint256 pendingCallbacks) = harness.countPendingAuto();
-        assertEq(pendingTimeouts, 0, "Should start with 0 pending timeouts");
-        assertEq(pendingCallbacks, 0, "Should start with 0 pending callbacks");
+        uint256 pendingPromises = harness.countPendingAuto();
+        assertEq(pendingPromises, 0, "Should start with 0 pending promises");
         
         // Create a timeout
         vm.prank(alice);
@@ -128,24 +125,21 @@ contract PromiseHarnessTest is Test {
         callbackContract.then(parentPromise, address(target), target.handleSuccess.selector);
         
         // Should still be 0 pending (timeout not ready, parent not settled)
-        (pendingTimeouts, pendingCallbacks) = harness.countPendingAuto();
-        assertEq(pendingTimeouts, 0, "Timeout not ready yet");
-        assertEq(pendingCallbacks, 0, "Parent not settled yet");
+        pendingPromises = harness.countPendingAuto();
+        assertEq(pendingPromises, 0, "Timeout not ready yet, parent not settled yet");
         
         // Fast forward time
         vm.warp(block.timestamp + 150);
         
-        (pendingTimeouts, pendingCallbacks) = harness.countPendingAuto();
-        assertEq(pendingTimeouts, 1, "Should have 1 pending timeout");
-        assertEq(pendingCallbacks, 0, "Still no pending callbacks");
+        pendingPromises = harness.countPendingAuto();
+        assertEq(pendingPromises, 1, "Should have 1 pending timeout");
         
         // Resolve parent promise
         vm.prank(alice);
         promiseContract.resolve(parentPromise, abi.encode(uint256(42)));
         
-        (pendingTimeouts, pendingCallbacks) = harness.countPendingAuto();
-        assertEq(pendingTimeouts, 1, "Should still have 1 pending timeout");
-        assertEq(pendingCallbacks, 1, "Should now have 1 pending callback");
+        pendingPromises = harness.countPendingAuto();
+        assertEq(pendingPromises, 2, "Should now have 2 pending promises (1 timeout + 1 callback)");
     }
 
     function test_getAllPromiseStatuses() public {
@@ -186,16 +180,16 @@ contract PromiseHarnessTest is Test {
         vm.warp(block.timestamp + 150);
         
         // Resolve only first 3 promises
-        (uint256 timeoutsResolved,) = harness.resolveAllPending(3);
-        assertEq(timeoutsResolved, 3, "Should resolve exactly 3 timeouts");
+        uint256 promisesResolved = harness.resolveAllPending(3);
+        assertEq(promisesResolved, 3, "Should resolve exactly 3 promises");
         
         // Check that promises 4 and 5 are still pending
         assertEq(uint256(promiseContract.status(4)), uint256(Promise.PromiseStatus.Pending), "Promise 4 should still be pending");
         assertEq(uint256(promiseContract.status(5)), uint256(Promise.PromiseStatus.Pending), "Promise 5 should still be pending");
         
         // Resolve the rest
-        (timeoutsResolved,) = harness.resolveAllPending(5);
-        assertEq(timeoutsResolved, 2, "Should resolve remaining 2 timeouts");
+        promisesResolved = harness.resolveAllPending(5);
+        assertEq(promisesResolved, 2, "Should resolve remaining 2 promises");
     }
 
     function test_handleResolveErrors() public {
@@ -210,17 +204,72 @@ contract PromiseHarnessTest is Test {
         setTimeoutContract.resolve(timeoutPromise);
         
         // Now harness should handle the error gracefully when trying to resolve again
-        (uint256 timeoutsResolved,) = harness.resolveAllPendingAuto();
-        assertEq(timeoutsResolved, 0, "Should resolve 0 timeouts (already resolved)");
+        uint256 promisesResolved = harness.resolveAllPendingAuto();
+        assertEq(promisesResolved, 0, "Should resolve 0 promises (already resolved)");
         
         // Should not revert
     }
 
     function test_emptyResolve() public {
         // With no promises, should handle gracefully
-        (uint256 timeoutsResolved, uint256 callbacksResolved) = harness.resolveAllPendingAuto();
-        assertEq(timeoutsResolved, 0, "Should resolve 0 timeouts");
-        assertEq(callbacksResolved, 0, "Should resolve 0 callbacks");
+        uint256 promisesResolved = harness.resolveAllPendingAuto();
+        assertEq(promisesResolved, 0, "Should resolve 0 promises");
+    }
+
+    function test_layeredResolution() public {
+        // Create a timeout
+        vm.prank(alice);
+        uint256 timeoutPromise = setTimeoutContract.create(block.timestamp + 100);
+        
+        // Create callback on the timeout
+        TestTarget target = new TestTarget();
+        vm.prank(bob);
+        uint256 callbackPromise = callbackContract.then(timeoutPromise, address(target), target.handleSuccess.selector);
+        
+        // Fast forward time
+        vm.warp(block.timestamp + 150);
+        
+        // First call should only resolve the timeout (layer 1)
+        uint256 promisesResolved1 = harness.resolveAllPendingAuto();
+        assertEq(promisesResolved1, 1, "First call should resolve 1 promise");
+        
+        // Timeout should be resolved, callback should still be pending
+        assertEq(uint256(promiseContract.status(timeoutPromise)), uint256(Promise.PromiseStatus.Resolved), "Timeout should be resolved");
+        assertEq(uint256(promiseContract.status(callbackPromise)), uint256(Promise.PromiseStatus.Pending), "Callback should still be pending");
+        
+        // Second call should resolve the callback (layer 2)
+        uint256 promisesResolved2 = harness.resolveAllPendingAuto();
+        assertEq(promisesResolved2, 1, "Second call should resolve 1 callback");
+        
+        // Now both should be resolved
+        assertEq(uint256(promiseContract.status(timeoutPromise)), uint256(Promise.PromiseStatus.Resolved), "Timeout should be resolved");
+        assertEq(uint256(promiseContract.status(callbackPromise)), uint256(Promise.PromiseStatus.Resolved), "Callback should be resolved");
+        
+        // Third call should resolve nothing
+        uint256 promisesResolved3 = harness.resolveAllPendingAuto();
+        assertEq(promisesResolved3, 0, "Third call should resolve 0 promises");
+    }
+
+    function test_resolveAllLayers() public {
+        // Create a timeout
+        vm.prank(alice);
+        uint256 timeoutPromise = setTimeoutContract.create(block.timestamp + 100);
+        
+        // Create callback on the timeout
+        TestTarget target = new TestTarget();
+        vm.prank(bob);
+        callbackContract.then(timeoutPromise, address(target), target.handleSuccess.selector);
+        
+        // Fast forward time
+        vm.warp(block.timestamp + 150);
+        
+        // Use resolveAllLayers to resolve everything at once
+        (uint256 totalPromises, uint256 layers) = harness.resolveAllLayers();
+        assertEq(totalPromises, 2, "Should resolve 2 promises total");
+        assertEq(layers, 2, "Should process 2 layers");
+        
+        // All promises should be resolved
+        assertEq(uint256(promiseContract.status(timeoutPromise)), uint256(Promise.PromiseStatus.Resolved), "Timeout should be resolved");
     }
 }
 
@@ -231,10 +280,17 @@ contract TestTarget {
     bool public errorCalled;
 
     function handleSuccess(bytes memory data) external returns (uint256) {
-        uint256 value = abi.decode(data, (uint256));
-        lastValue = value;
         successCalled = true;
-        return value * 2;
+        
+        if (data.length == 0) {
+            // Handle empty data (e.g., from SetTimeout)
+            lastValue = 0;
+            return 1; // Return a default value
+        } else {
+            uint256 value = abi.decode(data, (uint256));
+            lastValue = value;
+            return value * 2;
+        }
     }
 
     function handleError(bytes memory data) external returns (string memory) {
