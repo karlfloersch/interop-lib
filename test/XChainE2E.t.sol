@@ -375,6 +375,143 @@ contract XChainE2ETest is Test, Relayer {
         vm.selectFork(forkIds[0]);
         assertEq(feeBurner.totalBurned(), 0, "No fees should be burned on failure");
     }
+
+    /// @notice Test remote promise callback orchestration - Chain A orchestrates workflow triggered by Chain B timeout
+    /// @dev This demonstrates the new functionality where callbacks can be created for promises that don't exist locally
+    function test_RemotePromiseTimeoutOrchestration() public {
+        vm.selectFork(forkIds[0]);
+        
+        // Simulate accumulated fees on both chains
+        feeCollectorA.simulateAccumulatedFees(800 ether);
+        vm.selectFork(forkIds[1]);
+        feeCollectorB.simulateAccumulatedFees(400 ether);
+        
+        // **KEY DEMONSTRATION**: Chain B creates the timeout (the trigger)
+        vm.selectFork(forkIds[1]);
+        uint256 remoteTimeoutId = setTimeoutB.create(block.timestamp + 1800); // 30 minutes
+        
+        // **REMOTE PROMISE CALLBACKS**: Chain A creates callbacks for the remote timeout promise
+        // This demonstrates the new functionality - callbacks for promises that don't exist locally
+        vm.selectFork(forkIds[0]);
+        
+        // Verify the timeout promise doesn't exist on Chain A yet
+        assertFalse(promiseA.exists(remoteTimeoutId), "Remote timeout should not exist locally on Chain A");
+        
+        // Chain A creates callbacks for the remote timeout (this is the new functionality!)
+        uint256 chainAFeeCallback = callbackA.then(
+            remoteTimeoutId,  // Remote promise ID from Chain B
+            address(feeCollectorA),
+            FeeCollector.collectFees.selector
+        );
+        
+        uint256 chainBFeeCallback = callbackA.thenOn(
+            chainIdByForkId[forkIds[1]],
+            remoteTimeoutId,  // Remote promise ID from Chain B  
+            address(feeCollectorB),
+            FeeCollector.collectFees.selector
+        );
+        
+        // Debug: Check what IDs were returned
+        assertTrue(chainAFeeCallback > 0, "Chain A fee callback ID should be non-zero");
+        assertTrue(chainBFeeCallback > 0, "Chain B fee callback ID should be non-zero");
+        
+        // Verify callbacks were created correctly
+        // Local callback should exist on Chain A
+        assertTrue(callbackA.exists(chainAFeeCallback), "Chain A fee callback should exist for remote promise");
+        
+        // Cross-chain callback should NOT exist on Chain A (transferred to Chain B)
+        assertFalse(callbackA.exists(chainBFeeCallback), "Cross-chain callback should not exist on Chain A after transfer");
+        
+        // Local callback should not be resolvable yet (parent promise not shared)
+        assertFalse(callbackA.canResolve(chainAFeeCallback), "Local callback should not be resolvable yet");
+        
+        // Chain A orchestrates the aggregation using the remote timeout
+        uint256[] memory feeCallbacks = new uint256[](2);
+        feeCallbacks[0] = chainAFeeCallback;
+        feeCallbacks[1] = chainBFeeCallback;
+        
+        uint256 promiseAllId = promiseAllA.create(feeCallbacks);
+        
+        // Chain A sets up burning when all fees are collected
+        uint256 burnCallback = callbackA.then(
+            promiseAllId,
+            address(feeBurner),
+            FeeBurner.burnFees.selector
+        );
+        
+        // Relay cross-chain callback registration
+        relayAllMessages();
+        
+        // Verify cross-chain callback was registered on Chain B
+        vm.selectFork(forkIds[1]);
+        assertTrue(callbackB.exists(chainBFeeCallback), "Cross-chain callback should exist on Chain B after relay");
+        vm.selectFork(forkIds[0]);
+        
+        // Time passes and the timeout triggers on both chains
+        vm.warp(block.timestamp + 1900); // Warp time on Chain A first
+        vm.selectFork(forkIds[1]);
+        vm.warp(block.timestamp + 1900); // Warp time on Chain B fork
+        
+        // Chain B resolves its timeout
+        assertTrue(setTimeoutB.canResolve(remoteTimeoutId), "Remote timeout should be resolvable on Chain B");
+        setTimeoutB.resolve(remoteTimeoutId);
+        
+        // **CRITICAL STEP**: Chain B shares the resolved timeout to Chain A
+        uint256 chainAId = chainIdByForkId[forkIds[0]];
+        promiseB.shareResolvedPromise(chainAId, remoteTimeoutId);
+        relayAllMessages();
+        
+        // Now Chain A can see the resolved timeout and execute its workflow
+        vm.selectFork(forkIds[0]);
+        assertTrue(promiseA.exists(remoteTimeoutId), "Remote timeout should now exist on Chain A");
+        assertEq(uint8(promiseA.status(remoteTimeoutId)), uint8(Promise.PromiseStatus.Resolved), "Remote timeout should be resolved");
+        
+        // Chain A local callback should now be resolvable
+        assertTrue(callbackA.canResolve(chainAFeeCallback), "Chain A fee callback should be resolvable");
+        
+        // Chain B callback should be resolvable on Chain B
+        vm.selectFork(forkIds[1]);
+        assertTrue(callbackB.canResolve(chainBFeeCallback), "Chain B fee callback should be resolvable on Chain B");
+        vm.selectFork(forkIds[0]);
+        
+        // Execute fee collection on Chain A
+        callbackA.resolve(chainAFeeCallback);
+        
+        // Execute fee collection on Chain B (callback was registered cross-chain)
+        vm.selectFork(forkIds[1]);
+        assertTrue(callbackB.canResolve(chainBFeeCallback), "Chain B callback should be resolvable");
+        callbackB.resolve(chainBFeeCallback);
+        
+        // Share Chain B fee collection result back to Chain A
+        promiseB.shareResolvedPromise(chainAId, chainBFeeCallback);
+        relayAllMessages();
+        
+        // Chain A aggregates all results
+        vm.selectFork(forkIds[0]);
+        assertTrue(promiseAllA.canResolve(promiseAllId), "PromiseAll should be resolvable");
+        promiseAllA.resolve(promiseAllId);
+        
+        // Chain A burns the aggregated fees
+        assertTrue(callbackA.canResolve(burnCallback), "Burn callback should be resolvable");
+        callbackA.resolve(burnCallback);
+        
+        // Verify the entire workflow completed successfully
+        assertTrue(feeCollectorA.wasCollected(), "Chain A fees should be collected");
+        vm.selectFork(forkIds[1]);
+        assertTrue(feeCollectorB.wasCollected(), "Chain B fees should be collected");
+        vm.selectFork(forkIds[0]);
+        assertTrue(feeBurner.wasBurned(), "Fees should be burned");
+        
+        // Verify the amounts
+        assertEq(feeBurner.totalBurned(), 1200 ether, "Should burn total of 1200 ETH (800 + 400)");
+        assertEq(feeBurner.lastBurnAmount(), 1200 ether, "Last burn should be 1200 ETH");
+        
+        // **SUMMARY**: This test demonstrates:
+        // 1. Chain A created callbacks for a promise that only existed on Chain B (remote promise callbacks)
+        // 2. Chain A orchestrated a complex multi-chain workflow triggered by Chain B's timeout
+        // 3. The workflow executed correctly after the remote promise was shared
+        // 4. Demonstrates practical use case for remote promise callback functionality
+    }
 }
 
 /// @notice Mock fee collector contract
