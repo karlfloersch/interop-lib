@@ -17,7 +17,7 @@ contract CallbackTest is Test {
 
     function setUp() public {
         promiseContract = new Promise(address(0));
-        callbackContract = new Callback(address(promiseContract));
+        callbackContract = new Callback(address(promiseContract), address(0));
     }
 
     // Test contract that implements callback functions

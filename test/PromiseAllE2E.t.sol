@@ -24,7 +24,7 @@ contract PromiseAllE2ETest is Test {
         promiseContract = new Promise(address(0));
         promiseAllContract = new PromiseAll(address(promiseContract));
         setTimeoutContract = new SetTimeout(address(promiseContract));
-        callbackContract = new Callback(address(promiseContract));
+        callbackContract = new Callback(address(promiseContract), address(0));
         
         // Create harness with all resolvable contracts including PromiseAll
         address[] memory resolvableContracts = new address[](3);
