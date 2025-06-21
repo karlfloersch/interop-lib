@@ -193,9 +193,9 @@ contract SetTimeoutTest is Test {
         vm.prank(alice);
         uint256 promiseId = setTimeout.create(futureTimestamp);
         
-        // Verify the promise was created with correct creator
+        // Verify the promise was created with correct resolver
         Promise.PromiseData memory data = promiseContract.getPromise(promiseId);
-        assertEq(data.creator, address(setTimeout), "Promise creator should be SetTimeout contract");
+        assertEq(data.resolver, address(setTimeout), "Promise resolver should be SetTimeout contract");
         assertEq(uint256(data.status), uint256(Promise.PromiseStatus.Pending), "Promise should be pending");
         assertEq(data.returnData, "", "Promise should have empty return data initially");
         
