@@ -29,6 +29,8 @@ contract Callback is IResolvable {
         address target;
         bytes4 selector;
         CallbackType callbackType;
+        address registrant;     // Who registered this callback
+        uint256 sourceChain;    // Which chain it was registered from
     }
 
     /// @notice Mapping from callback promise ID to callback data
@@ -62,7 +64,9 @@ contract Callback is IResolvable {
             parentPromiseId: parentPromiseId,
             target: target,
             selector: selector,
-            callbackType: CallbackType.Then
+            callbackType: CallbackType.Then,
+            registrant: msg.sender,
+            sourceChain: currentChainId
         });
         
         emit CallbackRegistered(callbackPromiseId, parentPromiseId, CallbackType.Then);
@@ -82,7 +86,9 @@ contract Callback is IResolvable {
             parentPromiseId: parentPromiseId,
             target: target,
             selector: selector,
-            callbackType: CallbackType.Catch
+            callbackType: CallbackType.Catch,
+            registrant: msg.sender,
+            sourceChain: currentChainId
         });
         
         emit CallbackRegistered(callbackPromiseId, parentPromiseId, CallbackType.Catch);
@@ -106,12 +112,14 @@ contract Callback is IResolvable {
         
         // Send cross-chain message to register callback on destination chain
         bytes memory message = abi.encodeWithSignature(
-            "receiveCallbackRegistration(uint256,uint256,address,bytes4,uint8)",
+            "receiveCallbackRegistration(uint256,uint256,address,bytes4,uint8,address,uint256)",
             callbackPromiseId,
             parentPromiseId, 
             target,
             selector,
-            uint8(CallbackType.Then)
+            uint8(CallbackType.Then),
+            msg.sender,      // Include original registrant
+            currentChainId   // Include source chain ID
         );
         
         messenger.sendMessage(destinationChain, address(this), message);
@@ -137,12 +145,14 @@ contract Callback is IResolvable {
         
         // Send cross-chain message to register callback on destination chain
         bytes memory message = abi.encodeWithSignature(
-            "receiveCallbackRegistration(uint256,uint256,address,bytes4,uint8)",
+            "receiveCallbackRegistration(uint256,uint256,address,bytes4,uint8,address,uint256)",
             callbackPromiseId,
             parentPromiseId,
             target, 
             selector,
-            uint8(CallbackType.Catch)
+            uint8(CallbackType.Catch),
+            msg.sender,      // Include original registrant
+            currentChainId   // Include source chain ID
         );
         
         messenger.sendMessage(destinationChain, address(this), message);
@@ -156,23 +166,29 @@ contract Callback is IResolvable {
     /// @param target The contract address to call when parent settles
     /// @param selector The function selector to call
     /// @param callbackType The type of callback (Then or Catch)
+    /// @param registrant The original address that registered this callback
+    /// @param sourceChain The chain ID where this callback was originally registered
     function receiveCallbackRegistration(
         uint256 callbackPromiseId,
         uint256 parentPromiseId,
         address target,
         bytes4 selector,
-        uint8 callbackType
+        uint8 callbackType,
+        address registrant,
+        uint256 sourceChain
     ) external {
         // Verify the message comes from another Callback contract via cross-domain messenger
         require(msg.sender == address(messenger), "Callback: only messenger can call");
         require(messenger.crossDomainMessageSender() == address(this), "Callback: only from Callback contract");
         
-        // Store the callback data locally
+        // Store the callback data locally with auth tracking
         callbacks[callbackPromiseId] = CallbackData({
             parentPromiseId: parentPromiseId,
             target: target,
             selector: selector,
-            callbackType: CallbackType(callbackType)
+            callbackType: CallbackType(callbackType),
+            registrant: registrant,
+            sourceChain: sourceChain
         });
         
         emit CallbackRegistered(callbackPromiseId, parentPromiseId, CallbackType(callbackType));

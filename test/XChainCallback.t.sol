@@ -468,6 +468,204 @@ contract XChainCallbackTest is Test, Relayer {
     function dummyHandler(bytes memory) external pure returns (string memory) {
         return "dummy";
     }
+
+    /// @notice Test auth tracking for local callbacks
+    function test_LocalCallbackAuthTracking() public {
+        vm.selectFork(forkIds[0]);
+        
+        // Create parent promise
+        uint256 parentPromiseId = promiseA.create();
+        uint256 chainAId = chainIdByForkId[forkIds[0]];
+        
+        // Create target contract
+        vm.selectFork(forkIds[1]);
+        TestTarget target = new TestTarget();
+        
+        // Switch back to Chain A and register callback as alice
+        vm.selectFork(forkIds[0]);
+        address alice = address(0x1);
+        vm.prank(alice);
+        uint256 thenCallbackId = callbackA.then(
+            parentPromiseId,
+            address(target),
+            target.handleSuccess.selector
+        );
+        
+        // Register catch callback as bob
+        address bob = address(0x2);
+        vm.prank(bob);
+        uint256 catchCallbackId = callbackA.catchError(
+            parentPromiseId,
+            address(target),
+            target.handleError.selector
+        );
+        
+        // Verify auth tracking for then callback
+        Callback.CallbackData memory thenData = callbackA.getCallback(thenCallbackId);
+        assertEq(thenData.registrant, alice, "Then callback registrant should be alice");
+        assertEq(thenData.sourceChain, chainAId, "Then callback source chain should be Chain A");
+        
+        // Verify auth tracking for catch callback
+        Callback.CallbackData memory catchData = callbackA.getCallback(catchCallbackId);
+        assertEq(catchData.registrant, bob, "Catch callback registrant should be bob");
+        assertEq(catchData.sourceChain, chainAId, "Catch callback source chain should be Chain A");
+    }
+
+    /// @notice Test auth tracking for cross-chain callbacks
+    function test_CrossChainCallbackAuthTracking() public {
+        vm.selectFork(forkIds[0]);
+        
+        // Create parent promise on Chain A
+        uint256 parentPromiseId = promiseA.create();
+        uint256 chainAId = chainIdByForkId[forkIds[0]];
+        uint256 chainBId = chainIdByForkId[forkIds[1]];
+        
+        // Create target contract on Chain B
+        vm.selectFork(forkIds[1]);
+        TestTarget target = new TestTarget();
+        
+        // Register cross-chain callback as alice from Chain A to Chain B
+        vm.selectFork(forkIds[0]);
+        address alice = address(0x1);
+        vm.prank(alice);
+        uint256 callbackPromiseId = callbackA.thenOn(
+            chainBId,
+            parentPromiseId,
+            address(target),
+            target.handleSuccess.selector
+        );
+        
+        // Relay the callback registration message to Chain B
+        relayAllMessages();
+        
+        // Verify auth tracking on Chain B - should preserve alice as registrant and Chain A as source
+        vm.selectFork(forkIds[1]);
+        assertTrue(callbackB.exists(callbackPromiseId), "Callback should be registered on Chain B");
+        
+        Callback.CallbackData memory callbackData = callbackB.getCallback(callbackPromiseId);
+        assertEq(callbackData.registrant, alice, "Cross-chain callback registrant should be alice");
+        assertEq(callbackData.sourceChain, chainAId, "Cross-chain callback source chain should be Chain A");
+        assertEq(callbackData.target, address(target), "Target should match");
+        assertEq(uint8(callbackData.callbackType), uint8(Callback.CallbackType.Then), "Should be Then callback");
+    }
+
+    /// @notice Test auth tracking with multiple users and chains
+    function test_AuthTrackingWithMultipleUsers() public {
+        vm.selectFork(forkIds[0]);
+        
+        // Create promises on both chains
+        uint256 promiseA1 = promiseA.create();
+        uint256 promiseA2 = promiseA.create();
+        
+        vm.selectFork(forkIds[1]);
+        uint256 promiseB1 = promiseB.create();
+        TestTarget target = new TestTarget();
+        
+        uint256 chainAId = chainIdByForkId[forkIds[0]];
+        uint256 chainBId = chainIdByForkId[forkIds[1]];
+        
+        // Register callbacks from different users on different chains
+        address alice = address(0x1);
+        address bob = address(0x2);
+        address charlie = address(0x3);
+        
+        // Alice registers local callback on Chain A
+        vm.selectFork(forkIds[0]);
+        vm.prank(alice);
+        uint256 aliceLocalCallback = callbackA.then(
+            promiseA1,
+            address(target),
+            target.handleSuccess.selector
+        );
+        
+        // Bob registers cross-chain callback from Chain A to Chain B
+        vm.prank(bob);
+        uint256 bobXChainCallback = callbackA.catchErrorOn(
+            chainBId,
+            promiseA2,
+            address(target),
+            target.handleError.selector
+        );
+        
+        // Charlie registers local callback on Chain B
+        vm.selectFork(forkIds[1]);
+        vm.prank(charlie);
+        uint256 charlieLocalCallback = callbackB.then(
+            promiseB1,
+            address(target),
+            target.handleSuccess.selector
+        );
+        
+        // Relay cross-chain messages
+        relayAllMessages();
+        
+        // Verify all auth tracking
+        vm.selectFork(forkIds[0]);
+        Callback.CallbackData memory aliceData = callbackA.getCallback(aliceLocalCallback);
+        assertEq(aliceData.registrant, alice, "Alice's local callback registrant should be alice");
+        assertEq(aliceData.sourceChain, chainAId, "Alice's local callback source should be Chain A");
+        
+        vm.selectFork(forkIds[1]);
+        // Verify Bob's cross-chain callback on Chain B
+        Callback.CallbackData memory bobData = callbackB.getCallback(bobXChainCallback);
+        assertEq(bobData.registrant, bob, "Bob's cross-chain callback registrant should be bob");
+        assertEq(bobData.sourceChain, chainAId, "Bob's cross-chain callback source should be Chain A");
+        assertEq(uint8(bobData.callbackType), uint8(Callback.CallbackType.Catch), "Should be Catch callback");
+        
+        // Verify Charlie's local callback on Chain B
+        Callback.CallbackData memory charlieData = callbackB.getCallback(charlieLocalCallback);
+        assertEq(charlieData.registrant, charlie, "Charlie's local callback registrant should be charlie");
+        assertEq(charlieData.sourceChain, chainBId, "Charlie's local callback source should be Chain B");
+    }
+
+    /// @notice Test that cross-chain auth verification works correctly
+    function test_CrossChainAuthVerification() public {
+        vm.selectFork(forkIds[0]);
+        
+        // Create parent promise
+        uint256 parentPromiseId = promiseA.create();
+        uint256 chainBId = chainIdByForkId[forkIds[1]];
+        
+        // Create target on Chain B
+        vm.selectFork(forkIds[1]);
+        TestTarget target = new TestTarget();
+        
+        // Register cross-chain callback from Chain A
+        vm.selectFork(forkIds[0]);
+        address registrant = address(0x123);
+        vm.prank(registrant);
+        uint256 callbackPromiseId = callbackA.thenOn(
+            chainBId,
+            parentPromiseId,
+            address(target),
+            target.handleSuccess.selector
+        );
+        
+        // Relay the message
+        relayAllMessages();
+        
+        // Verify the callback was registered correctly on Chain B with proper auth
+        vm.selectFork(forkIds[1]);
+        assertTrue(callbackB.exists(callbackPromiseId), "Callback should exist on Chain B");
+        
+        Callback.CallbackData memory data = callbackB.getCallback(callbackPromiseId);
+        assertEq(data.registrant, registrant, "Registrant should be preserved across chains");
+        assertEq(data.sourceChain, chainIdByForkId[forkIds[0]], "Source chain should be Chain A");
+        
+        // Now test that the callback works end-to-end
+        vm.selectFork(forkIds[0]);
+        promiseA.resolve(parentPromiseId, abi.encode("test data"));
+        promiseA.shareResolvedPromise(chainBId, parentPromiseId);
+        relayAllMessages();
+        
+        vm.selectFork(forkIds[1]);
+        assertTrue(callbackB.canResolve(callbackPromiseId), "Callback should be resolvable");
+        callbackB.resolve(callbackPromiseId);
+        
+        // Verify execution
+        assertTrue(target.successCalled(), "Target should have been called");
+        assertEq(target.lastValue(), "test data", "Target should receive correct data");
+    }
 }
 
 /// @notice Test contract for callback functionality

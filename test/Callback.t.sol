@@ -366,6 +366,46 @@ contract CallbackTest is Test {
     function test_existsForNonExistentCallback() public {
         assertFalse(callbackContract.exists(999), "Non-existent callback should not exist");
     }
+
+    function test_authTrackingForLocalCallbacks() public {
+        test_setUp();
+        
+        // Create parent promise
+        vm.prank(alice);
+        uint256 parentPromiseId = promiseContract.create();
+        
+        // Register then callback as bob
+        vm.prank(bob);
+        uint256 thenCallbackId = callbackContract.then(
+            parentPromiseId,
+            address(testTarget),
+            testTarget.handleSuccess.selector
+        );
+        
+        // Register catch callback as alice
+        vm.prank(alice);
+        uint256 catchCallbackId = callbackContract.catchError(
+            parentPromiseId,
+            address(testTarget),
+            testTarget.handleError.selector
+        );
+        
+        // Verify auth tracking for then callback
+        Callback.CallbackData memory thenData = callbackContract.getCallback(thenCallbackId);
+        assertEq(thenData.registrant, bob, "Then callback registrant should be bob");
+        assertEq(thenData.sourceChain, block.chainid, "Then callback source chain should be current chain");
+        assertEq(thenData.parentPromiseId, parentPromiseId, "Parent promise ID should match");
+        assertEq(thenData.target, address(testTarget), "Target should match");
+        assertEq(uint8(thenData.callbackType), uint8(Callback.CallbackType.Then), "Should be Then callback");
+        
+        // Verify auth tracking for catch callback
+        Callback.CallbackData memory catchData = callbackContract.getCallback(catchCallbackId);
+        assertEq(catchData.registrant, alice, "Catch callback registrant should be alice");
+        assertEq(catchData.sourceChain, block.chainid, "Catch callback source chain should be current chain");
+        assertEq(catchData.parentPromiseId, parentPromiseId, "Parent promise ID should match");
+        assertEq(catchData.target, address(testTarget), "Target should match");
+        assertEq(uint8(catchData.callbackType), uint8(Callback.CallbackType.Catch), "Should be Catch callback");
+    }
 }
 
 /// @notice Test contract for callback functionality
