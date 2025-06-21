@@ -56,7 +56,7 @@ contract CallbackTest is Test {
         assertFalse(callbackContract.canResolve(callbackPromiseId), "Callback should not be resolvable yet");
     }
 
-    function test_createOnRejectCallback() public {
+    function test_createCatchCallback() public {
         test_setUp();
         
         vm.prank(alice);
@@ -67,7 +67,7 @@ contract CallbackTest is Test {
         vm.expectEmit(true, true, false, true);
         emit CallbackRegistered(expectedCallbackId, parentPromiseId, Callback.CallbackType.Catch);
         
-        uint256 callbackPromiseId = callbackContract.onReject(
+        uint256 callbackPromiseId = callbackContract.catchError(
             parentPromiseId, 
             address(testTarget), 
             testTarget.handleError.selector
@@ -87,15 +87,15 @@ contract CallbackTest is Test {
         
         // Should now be able to create callbacks for non-existent promises (for cross-chain compatibility)
         uint256 callback1 = callbackContract.then(999, address(testTarget), testTarget.handleSuccess.selector);
-        uint256 callback2 = callbackContract.onReject(999, address(testTarget), testTarget.handleError.selector);
+        uint256 callback2 = callbackContract.catchError(999, address(testTarget), testTarget.handleError.selector);
         
         // Callbacks should exist even though parent promise doesn't exist locally
         assertTrue(callbackContract.exists(callback1), "Then callback should exist for non-existent promise");
-        assertTrue(callbackContract.exists(callback2), "OnReject callback should exist for non-existent promise");
+        assertTrue(callbackContract.exists(callback2), "Catch callback should exist for non-existent promise");
         
         // Callbacks should not be resolvable since parent promise doesn't exist
         assertFalse(callbackContract.canResolve(callback1), "Then callback should not be resolvable for non-existent promise");
-        assertFalse(callbackContract.canResolve(callback2), "OnReject callback should not be resolvable for non-existent promise");
+        assertFalse(callbackContract.canResolve(callback2), "Catch callback should not be resolvable for non-existent promise");
         
         // Verify callback data is stored correctly
         Callback.CallbackData memory data1 = callbackContract.getCallback(callback1);
@@ -152,16 +152,16 @@ contract CallbackTest is Test {
         assertTrue(testTarget.successCalled(), "Success handler should have been called");
     }
 
-    function test_resolveOnRejectCallback() public {
+    function test_resolveCatchCallback() public {
         test_setUp();
         
         // Create parent promise
         vm.prank(alice);
         uint256 parentPromiseId = promiseContract.create();
         
-        // Create onReject callback
+        // Create catch callback
         vm.prank(bob);
-        uint256 callbackPromiseId = callbackContract.onReject(
+        uint256 callbackPromiseId = callbackContract.catchError(
             parentPromiseId, 
             address(testTarget), 
             testTarget.handleError.selector
@@ -216,15 +216,15 @@ contract CallbackTest is Test {
         assertFalse(testTarget.successCalled(), "Success handler should not have been called");
     }
 
-    function test_onRejectCallbackNotExecutedWhenParentResolves() public {
+    function test_catchCallbackNotExecutedWhenParentResolves() public {
         test_setUp();
         
-        // Create parent promise and onReject callback
+        // Create parent promise and catch callback
         vm.prank(alice);
         uint256 parentPromiseId = promiseContract.create();
         
         vm.prank(bob);
-        uint256 callbackPromiseId = callbackContract.onReject(
+        uint256 callbackPromiseId = callbackContract.catchError(
             parentPromiseId, 
             address(testTarget), 
             testTarget.handleError.selector

@@ -216,7 +216,7 @@ contract PromiseBridge {
         rollbackPromiseId = promiseContract.create();
         
         // Register rollback callback for rejection case
-        callbackContract.onReject(
+        callbackContract.catchError(
             bridgePromiseId,
             address(this),
             this.executeRollback.selector

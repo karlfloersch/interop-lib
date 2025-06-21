@@ -192,7 +192,7 @@ contract CrossChainSwapExampleTest is Test, Relayer {
         
         // CATCH: Register rollback for final swap failures (bridge tokens back)
         console.log("SETUP: Chaining bridge-back for final swap failures");
-        uint256 bridgeBackCallbackId = callbackA.onRejectOn(
+        uint256 bridgeBackCallbackId = callbackA.catchErrorOn(
             chainIdByForkId[forkIds[1]], // Execute on Chain B
             finalSwapCallbackId,        // If final swap fails
             address(this),              // Call back to this contract
@@ -302,7 +302,7 @@ contract CrossChainSwapExampleTest is Test, Relayer {
         );
         
         console.log("SETUP: Chaining automatic bridge-back for final swap failures");
-        uint256 bridgeBackCallbackId = callbackA.onRejectOn(
+        uint256 bridgeBackCallbackId = callbackA.catchErrorOn(
             chainIdByForkId[forkIds[1]],
             finalSwapCallbackId,
             address(this),
@@ -407,7 +407,7 @@ contract CrossChainSwapExampleTest is Test, Relayer {
         uint256 workflowPromiseId = promiseA.create();
         
         // Set up failure detection callback that triggers rollback
-        uint256 rollbackCallbackId = callbackA.onReject(
+        uint256 rollbackCallbackId = callbackA.catchError(
             workflowPromiseId,
             address(this),
             this.executeAutomaticRollback.selector
@@ -487,7 +487,7 @@ contract CrossChainSwapExampleTest is Test, Relayer {
         // Check if failure mode is enabled (determines success vs failure path)
         if (exchangeB.isFailureModeEnabled(address(token2), address(token3))) {
             console.log("BRANCHING: Failure mode detected - swap will fail");
-            // REVERT to trigger the catch codepath (onRejectOn callback)
+            // REVERT to trigger the catch codepath (catchErrorOn callback)
             revert("Swap failed due to failure mode");
         } else {
             console.log("BRANCHING: Success path - executing swap");

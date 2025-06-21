@@ -220,9 +220,9 @@ contract E2ETest is Test {
         // Normal target should have been called
         assertTrue(normalTarget.called(), "Normal target should have been called");
         
-        // Now register an onReject callback on the failing callback (which is now rejected)
+        // Now register a catch callback on the failing callback (which is now rejected)
         vm.prank(charlie);
-        uint256 errorCallback = callbackContract.onReject(failingCallback, address(errorTarget), errorTarget.handleError.selector);
+        uint256 errorCallback = callbackContract.catchError(failingCallback, address(errorTarget), errorTarget.handleError.selector);
         
         // Error callback should be resolvable now since failingCallback is rejected
         assertTrue(callbackContract.canResolve(errorCallback), "Error callback should be resolvable");
