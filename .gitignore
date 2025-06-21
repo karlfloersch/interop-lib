@@ -9,3 +9,14 @@ out/
 
 # Dotenv file
 .env
+
+# Scripts directory
+scripts/node_modules/
+scripts/deployed-addresses.json
+scripts/.env
+scripts/.env.local
+scripts/.env.production
+scripts/npm-debug.log*
+scripts/yarn-debug.log*
+scripts/yarn-error.log*
+scripts/.pnpm-debug.log*
