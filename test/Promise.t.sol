@@ -10,22 +10,22 @@ contract PromiseTest is Test {
     address public alice = address(0x1);
     address public bob = address(0x2);
 
-    event PromiseCreated(uint256 indexed promiseId, address indexed resolver);
-    event PromiseResolved(uint256 indexed promiseId, bytes returnData);
-    event PromiseRejected(uint256 indexed promiseId, bytes errorData);
+    event PromiseCreated(bytes32 indexed promiseId, address indexed resolver);
+    event PromiseResolved(bytes32 indexed promiseId, bytes returnData);
+    event PromiseRejected(bytes32 indexed promiseId, bytes errorData);
 
     function setUp() public {
         promiseContract = new Promise(address(0));
     }
 
     function test_createPromise() public {
-        uint256 expectedId = promiseContract.generateGlobalPromiseId(block.chainid, 1);
+        bytes32 expectedId = promiseContract.generateGlobalPromiseId(block.chainid, bytes32(uint256(1)));
         
         vm.expectEmit(true, true, false, true);
         emit PromiseCreated(expectedId, alice);
         
         vm.prank(alice);
-        uint256 promiseId = promiseContract.create();
+        bytes32 promiseId = promiseContract.create();
         
         assertEq(promiseId, expectedId, "First promise should have correct global ID");
         
@@ -40,13 +40,13 @@ contract PromiseTest is Test {
 
     function test_createMultiplePromises() public {
         vm.prank(alice);
-        uint256 promiseId1 = promiseContract.create();
+        bytes32 promiseId1 = promiseContract.create();
         
         vm.prank(bob);
-        uint256 promiseId2 = promiseContract.create();
+        bytes32 promiseId2 = promiseContract.create();
         
-        uint256 expectedId1 = promiseContract.generateGlobalPromiseId(block.chainid, 1);
-        uint256 expectedId2 = promiseContract.generateGlobalPromiseId(block.chainid, 2);
+        bytes32 expectedId1 = promiseContract.generateGlobalPromiseId(block.chainid, bytes32(uint256(1)));
+        bytes32 expectedId2 = promiseContract.generateGlobalPromiseId(block.chainid, bytes32(uint256(2)));
         
         assertEq(promiseId1, expectedId1, "First promise should have correct global ID");
         assertEq(promiseId2, expectedId2, "Second promise should have correct global ID");
@@ -60,7 +60,7 @@ contract PromiseTest is Test {
 
     function test_resolvePromise() public {
         vm.prank(alice);
-        uint256 promiseId = promiseContract.create();
+        bytes32 promiseId = promiseContract.create();
         
         bytes memory returnData = abi.encode(uint256(42));
         
@@ -78,7 +78,7 @@ contract PromiseTest is Test {
 
     function test_rejectPromise() public {
         vm.prank(alice);
-        uint256 promiseId = promiseContract.create();
+        bytes32 promiseId = promiseContract.create();
         
         bytes memory errorData = abi.encode("Something went wrong");
         
@@ -96,7 +96,7 @@ contract PromiseTest is Test {
 
     function test_onlyResolverCanResolve() public {
         vm.prank(alice);
-        uint256 promiseId = promiseContract.create();
+        bytes32 promiseId = promiseContract.create();
         
         bytes memory returnData = abi.encode(uint256(42));
         
@@ -107,7 +107,7 @@ contract PromiseTest is Test {
 
     function test_onlyResolverCanReject() public {
         vm.prank(alice);
-        uint256 promiseId = promiseContract.create();
+        bytes32 promiseId = promiseContract.create();
         
         bytes memory errorData = abi.encode("Error");
         
@@ -120,19 +120,19 @@ contract PromiseTest is Test {
         bytes memory returnData = abi.encode(uint256(42));
         
         vm.expectRevert("Promise: only resolver can resolve");
-        promiseContract.resolve(999, returnData);
+        promiseContract.resolve(bytes32(uint256(999)), returnData);
     }
 
     function test_cannotRejectNonExistentPromise() public {
         bytes memory errorData = abi.encode("Error");
         
         vm.expectRevert("Promise: only resolver can reject");
-        promiseContract.reject(999, errorData);
+        promiseContract.reject(bytes32(uint256(999)), errorData);
     }
 
     function test_cannotResolveAlreadyResolvedPromise() public {
         vm.prank(alice);
-        uint256 promiseId = promiseContract.create();
+        bytes32 promiseId = promiseContract.create();
         
         bytes memory returnData1 = abi.encode(uint256(42));
         bytes memory returnData2 = abi.encode(uint256(100));
@@ -147,7 +147,7 @@ contract PromiseTest is Test {
 
     function test_cannotRejectAlreadyResolvedPromise() public {
         vm.prank(alice);
-        uint256 promiseId = promiseContract.create();
+        bytes32 promiseId = promiseContract.create();
         
         bytes memory returnData = abi.encode(uint256(42));
         bytes memory errorData = abi.encode("Error");
@@ -162,7 +162,7 @@ contract PromiseTest is Test {
 
     function test_cannotResolveAlreadyRejectedPromise() public {
         vm.prank(alice);
-        uint256 promiseId = promiseContract.create();
+        bytes32 promiseId = promiseContract.create();
         
         bytes memory errorData = abi.encode("Error");
         bytes memory returnData = abi.encode(uint256(42));
@@ -177,7 +177,7 @@ contract PromiseTest is Test {
 
     function test_cannotRejectedAlreadyRejectedPromise() public {
         vm.prank(alice);
-        uint256 promiseId = promiseContract.create();
+        bytes32 promiseId = promiseContract.create();
         
         bytes memory errorData1 = abi.encode("Error 1");
         bytes memory errorData2 = abi.encode("Error 2");
@@ -192,38 +192,38 @@ contract PromiseTest is Test {
 
     function test_statusOfNonExistentPromise() public {
         // Non-existent promises return Pending status (cross-chain compatible behavior)
-        assertEq(uint256(promiseContract.status(999)), uint256(Promise.PromiseStatus.Pending));
+        assertEq(uint256(promiseContract.status(bytes32(uint256(999)))), uint256(Promise.PromiseStatus.Pending));
     }
 
     function test_getPromiseOfNonExistentPromise() public {
         // Non-existent promises return empty data (cross-chain compatible behavior)
-        Promise.PromiseData memory data = promiseContract.getPromise(999);
+        Promise.PromiseData memory data = promiseContract.getPromise(bytes32(uint256(999)));
         assertEq(data.resolver, address(0));
         assertEq(uint256(data.status), uint256(Promise.PromiseStatus.Pending));
         assertEq(data.returnData.length, 0);
     }
 
     function test_existsReturnsFalseForNonExistentPromise() public {
-        assertFalse(promiseContract.exists(999), "Non-existent promise should not exist");
+        assertFalse(promiseContract.exists(bytes32(uint256(999))), "Non-existent promise should not exist");
     }
 
-    function test_getNextPromiseId() public {
-        assertEq(promiseContract.getNextPromiseId(), 1, "Next promise ID should start at 1");
+    function test_getNonce() public {
+        assertEq(promiseContract.getNonce(), 1, "Next nonce should start at 1");
         
         vm.prank(alice);
         promiseContract.create();
         
-        assertEq(promiseContract.getNextPromiseId(), 2, "Next promise ID should be 2 after creating one promise");
+        assertEq(promiseContract.getNonce(), 2, "Next nonce should be 2 after creating one promise");
         
         vm.prank(bob);
         promiseContract.create();
         
-        assertEq(promiseContract.getNextPromiseId(), 3, "Next promise ID should be 3 after creating two promises");
+        assertEq(promiseContract.getNonce(), 3, "Next nonce should be 3 after creating two promises");
     }
 
     function testFuzz_createAndResolvePromise(uint256 value, string memory message) public {
         vm.prank(alice);
-        uint256 promiseId = promiseContract.create();
+        bytes32 promiseId = promiseContract.create();
         
         bytes memory returnData = abi.encode(value, message);
         

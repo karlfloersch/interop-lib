@@ -34,7 +34,7 @@ contract Callback is IResolvable {
 
     /// @notice Callback data structure
     struct CallbackData {
-        uint256 parentPromiseId;
+        bytes32 parentPromiseId;
         address target;
         bytes4 selector;
         CallbackType callbackType;
@@ -43,13 +43,13 @@ contract Callback is IResolvable {
     }
 
     /// @notice Mapping from callback promise ID to callback data
-    mapping(uint256 => CallbackData) public callbacks;
+    mapping(bytes32 => CallbackData) public callbacks;
 
     /// @notice Event emitted when a callback is registered
-    event CallbackRegistered(uint256 indexed callbackPromiseId, uint256 indexed parentPromiseId, CallbackType callbackType);
+    event CallbackRegistered(bytes32 indexed callbackPromiseId, bytes32 indexed parentPromiseId, CallbackType callbackType);
 
     /// @notice Event emitted when a callback is executed
-    event CallbackExecuted(uint256 indexed callbackPromiseId, bool success, bytes returnData);
+    event CallbackExecuted(bytes32 indexed callbackPromiseId, bool success, bytes returnData);
 
     /// @param _promiseContract The address of the Promise contract
     /// @param _messenger The cross-domain messenger contract address (use address(0) for local-only mode)
@@ -64,7 +64,7 @@ contract Callback is IResolvable {
     /// @param target The contract address to call when parent resolves
     /// @param selector The function selector to call
     /// @return callbackPromiseId The ID of the created callback promise
-    function then(uint256 parentPromiseId, address target, bytes4 selector) external returns (uint256 callbackPromiseId) {
+    function then(bytes32 parentPromiseId, address target, bytes4 selector) external returns (bytes32 callbackPromiseId) {
         // Create a new promise for this callback
         callbackPromiseId = promiseContract.create();
         
@@ -86,7 +86,7 @@ contract Callback is IResolvable {
     /// @param target The contract address to call when parent rejects
     /// @param selector The function selector to call
     /// @return callbackPromiseId The ID of the created callback promise
-    function catchError(uint256 parentPromiseId, address target, bytes4 selector) external returns (uint256 callbackPromiseId) {
+    function catchError(bytes32 parentPromiseId, address target, bytes4 selector) external returns (bytes32 callbackPromiseId) {
         // Create a new promise for this callback
         callbackPromiseId = promiseContract.create();
         
@@ -109,7 +109,7 @@ contract Callback is IResolvable {
     /// @param target The contract address to call when parent resolves
     /// @param selector The function selector to call
     /// @return callbackPromiseId The ID of the created callback promise
-    function thenOn(uint256 destinationChain, uint256 parentPromiseId, address target, bytes4 selector) external returns (uint256 callbackPromiseId) {
+    function thenOn(uint256 destinationChain, bytes32 parentPromiseId, address target, bytes4 selector) external returns (bytes32 callbackPromiseId) {
         require(address(messenger) != address(0), "Callback: cross-chain not enabled");
         require(destinationChain != currentChainId, "Callback: cannot register callback on same chain");
         
@@ -121,7 +121,7 @@ contract Callback is IResolvable {
         
         // Send cross-chain message to register callback on destination chain
         bytes memory message = abi.encodeWithSignature(
-            "receiveCallbackRegistration(uint256,uint256,address,bytes4,uint8,address,uint256)",
+            "receiveCallbackRegistration(bytes32,bytes32,address,bytes4,uint8,address,uint256)",
             callbackPromiseId,
             parentPromiseId, 
             target,
@@ -142,7 +142,7 @@ contract Callback is IResolvable {
     /// @param target The contract address to call when parent rejects
     /// @param selector The function selector to call
     /// @return callbackPromiseId The ID of the created callback promise
-    function catchErrorOn(uint256 destinationChain, uint256 parentPromiseId, address target, bytes4 selector) external returns (uint256 callbackPromiseId) {
+    function catchErrorOn(uint256 destinationChain, bytes32 parentPromiseId, address target, bytes4 selector) external returns (bytes32 callbackPromiseId) {
         require(address(messenger) != address(0), "Callback: cross-chain not enabled");
         require(destinationChain != currentChainId, "Callback: cannot register callback on same chain");
         
@@ -154,7 +154,7 @@ contract Callback is IResolvable {
         
         // Send cross-chain message to register callback on destination chain
         bytes memory message = abi.encodeWithSignature(
-            "receiveCallbackRegistration(uint256,uint256,address,bytes4,uint8,address,uint256)",
+            "receiveCallbackRegistration(bytes32,bytes32,address,bytes4,uint8,address,uint256)",
             callbackPromiseId,
             parentPromiseId,
             target, 
@@ -178,8 +178,8 @@ contract Callback is IResolvable {
     /// @param registrant The original address that registered this callback
     /// @param sourceChain The chain ID where this callback was originally registered
     function receiveCallbackRegistration(
-        uint256 callbackPromiseId,
-        uint256 parentPromiseId,
+        bytes32 callbackPromiseId,
+        bytes32 parentPromiseId,
         address target,
         bytes4 selector,
         uint8 callbackType,
@@ -239,7 +239,7 @@ contract Callback is IResolvable {
 
     /// @notice Resolve a callback promise by executing the callback if conditions are met
     /// @param callbackPromiseId The ID of the callback promise to resolve
-    function resolve(uint256 callbackPromiseId) external {
+    function resolve(bytes32 callbackPromiseId) external {
         CallbackData memory callbackData = callbacks[callbackPromiseId];
         require(callbackData.target != address(0), "Callback: callback does not exist");
         
@@ -307,8 +307,8 @@ contract Callback is IResolvable {
 
     /// @notice Check if a callback can be resolved
     /// @param callbackPromiseId The ID of the callback promise to check
-    /// @return canResolve Whether the callback can be resolved now
-    function canResolve(uint256 callbackPromiseId) external view returns (bool canResolve) {
+    /// @return canResolveCallback Whether the callback can be resolved now
+    function canResolve(bytes32 callbackPromiseId) external view returns (bool canResolveCallback) {
         CallbackData memory callbackData = callbacks[callbackPromiseId];
         if (callbackData.target == address(0)) return false;
         
@@ -334,14 +334,14 @@ contract Callback is IResolvable {
     /// @notice Get callback data for a callback promise
     /// @param callbackPromiseId The ID of the callback promise
     /// @return callbackData The callback data, or empty if doesn't exist
-    function getCallback(uint256 callbackPromiseId) external view returns (CallbackData memory callbackData) {
+    function getCallback(bytes32 callbackPromiseId) external view returns (CallbackData memory callbackData) {
         return callbacks[callbackPromiseId];
     }
 
     /// @notice Check if a callback promise exists
     /// @param callbackPromiseId The ID of the callback promise to check
-    /// @return exists Whether the callback exists
-    function exists(uint256 callbackPromiseId) external view returns (bool exists) {
+    /// @return callbackExists Whether the callback exists
+    function exists(bytes32 callbackPromiseId) external view returns (bool callbackExists) {
         return callbacks[callbackPromiseId].target != address(0);
     }
 } 

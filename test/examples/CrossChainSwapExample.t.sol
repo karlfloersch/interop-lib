@@ -42,7 +42,7 @@ contract CrossChainSwapExampleTest is Test, Relayer {
     uint256 public initialToken1Balance;
     uint256 public initialToken3Balance;
     uint256 public swapAmount = 100 ether;
-    uint256 public rollbackCallbackId;
+    bytes32 public rollbackCallbackId;
 
     string[] private rpcUrls = [
         vm.envOr("CHAIN_A_RPC_URL", string("https://interop-alpha-0.optimism.io")),
@@ -50,6 +50,11 @@ contract CrossChainSwapExampleTest is Test, Relayer {
     ];
 
     constructor() Relayer(rpcUrls) {}
+
+    /// @notice Setter for rollback callback ID to avoid shadowing issues
+    function setRollbackCallbackId(bytes32 _rollbackCallbackId) external {
+        rollbackCallbackId = _rollbackCallbackId;
+    }
 
     function setUp() public {
         user = makeAddr("user");
@@ -174,7 +179,7 @@ contract CrossChainSwapExampleTest is Test, Relayer {
         uint256 token2Amount = exchangeA.swap(address(token1), address(token2), swapAmount);
         
         console.log("SETUP: Executing bridge operation");  
-        (uint256 bridgePromiseId, uint256 bridgeCallbackId) = bridgeA.bridgeTokens(
+        (bytes32 bridgePromiseId, bytes32 bridgeCallbackId) = bridgeA.bridgeTokens(
             address(token2),
             token2Amount,
             chainIdByForkId[forkIds[1]], // Chain B
@@ -183,7 +188,7 @@ contract CrossChainSwapExampleTest is Test, Relayer {
         
         // CHAINING: Register callback that chains to bridge completion
         console.log("SETUP: Chaining final swap with failure handling");
-        uint256 finalSwapCallbackId = callbackA.thenOn(
+        bytes32 finalSwapCallbackId = callbackA.thenOn(
             chainIdByForkId[forkIds[1]], // Execute on Chain B  
             bridgePromiseId,            // When bridge promise resolves
             address(this),              // Call back to this contract
@@ -192,7 +197,7 @@ contract CrossChainSwapExampleTest is Test, Relayer {
         
         // CATCH: Register rollback for final swap failures (bridge tokens back)
         console.log("SETUP: Chaining bridge-back for final swap failures");
-        uint256 bridgeBackCallbackId = callbackA.catchErrorOn(
+        bytes32 bridgeBackCallbackId = callbackA.catchErrorOn(
             chainIdByForkId[forkIds[1]], // Execute on Chain B
             finalSwapCallbackId,        // If final swap fails
             address(this),              // Call back to this contract
@@ -286,7 +291,7 @@ contract CrossChainSwapExampleTest is Test, Relayer {
         uint256 token2Amount = exchangeA.swap(address(token1), address(token2), swapAmount);
         
         console.log("SETUP: Executing bridge operation");  
-        (uint256 bridgePromiseId, uint256 bridgeCallbackId) = bridgeA.bridgeTokens(
+        (bytes32 bridgePromiseId, bytes32 bridgeCallbackId) = bridgeA.bridgeTokens(
             address(token2),
             token2Amount,
             chainIdByForkId[forkIds[1]],
@@ -294,7 +299,7 @@ contract CrossChainSwapExampleTest is Test, Relayer {
         );
         
         console.log("SETUP: Chaining final swap (will detect failure and trigger rollback)");
-        uint256 finalSwapCallbackId = callbackA.thenOn(
+        bytes32 finalSwapCallbackId = callbackA.thenOn(
             chainIdByForkId[forkIds[1]],
             bridgePromiseId,
             address(this),
@@ -302,15 +307,15 @@ contract CrossChainSwapExampleTest is Test, Relayer {
         );
         
         console.log("SETUP: Chaining automatic bridge-back for final swap failures");
-        uint256 bridgeBackCallbackId = callbackA.catchErrorOn(
+        bytes32 bridgeBackCallbackId = callbackA.catchErrorOn(
             chainIdByForkId[forkIds[1]],
             finalSwapCallbackId,
             address(this),
             this.bridgeTokensBack.selector
         );
         
-        // Store callback ID for later use
-        rollbackCallbackId = bridgeBackCallbackId;
+        // Store callback ID for later use (assign to class variable)
+        this.setRollbackCallbackId(bridgeBackCallbackId);
         
                  // Note: Additional recovery layers could be added here if needed
          // For this example, the bridge-back is the primary rollback mechanism
@@ -404,10 +409,10 @@ contract CrossChainSwapExampleTest is Test, Relayer {
         console.log("Using promise callbacks for automated failure handling");
         
         // Create a comprehensive workflow promise
-        uint256 workflowPromiseId = promiseA.create();
+        bytes32 workflowPromiseId = promiseA.create();
         
         // Set up failure detection callback that triggers rollback
-        uint256 rollbackCallbackId = callbackA.catchError(
+        bytes32 localRollbackCallbackId = callbackA.catchError(
             workflowPromiseId,
             address(this),
             this.executeAutomaticRollback.selector
@@ -420,7 +425,7 @@ contract CrossChainSwapExampleTest is Test, Relayer {
         uint256 token2Amount = exchangeA.swap(address(token1), address(token2), swapAmount);
         
         token2.approve(address(bridgeA), token2Amount);
-        (uint256 bridgePromiseId, uint256 bridgeCallbackId) = bridgeA.bridgeTokens(
+        (bytes32 bridgePromiseId, bytes32 bridgeCallbackId) = bridgeA.bridgeTokens(
             address(token2),
             token2Amount,
             chainIdByForkId[forkIds[1]],
@@ -444,8 +449,8 @@ contract CrossChainSwapExampleTest is Test, Relayer {
         promiseA.reject(workflowPromiseId, abi.encode("Second swap failed"));
         
         // Execute the rollback callback
-        if (callbackA.canResolve(rollbackCallbackId)) {
-            callbackA.resolve(rollbackCallbackId);
+        if (callbackA.canResolve(localRollbackCallbackId)) {
+            callbackA.resolve(localRollbackCallbackId);
         }
         
         console.log("Promise-based rollback mechanism demonstrated");
@@ -535,7 +540,7 @@ contract CrossChainSwapExampleTest is Test, Relayer {
             vm.startPrank(user);
             token2.approve(address(bridgeB), token2Balance);
             
-            (uint256 rollbackPromiseId, uint256 rollbackCallbackId) = bridgeB.bridgeTokens(
+            (bytes32 rollbackPromiseId, bytes32 localRollbackCallbackId) = bridgeB.bridgeTokens(
                 address(token2),
                 token2Balance,
                 chainIdByForkId[forkIds[0]], // Back to Chain A
@@ -543,7 +548,7 @@ contract CrossChainSwapExampleTest is Test, Relayer {
             );
             vm.stopPrank();
             
-            console.log("ROLLBACK: Tokens bridged back, promise ID:", rollbackPromiseId);
+            console.log("ROLLBACK: Tokens bridged back, promise ID:", uint256(rollbackPromiseId));
             return abi.encode(true, rollbackPromiseId, "Tokens bridged back to Chain A");
         } else {
             console.log("ROLLBACK: No tokens to bridge back");

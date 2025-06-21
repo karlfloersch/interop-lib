@@ -12,8 +12,8 @@ contract CallbackTest is Test {
     address public alice = address(0x1);
     address public bob = address(0x2);
 
-    event CallbackRegistered(uint256 indexed callbackPromiseId, uint256 indexed parentPromiseId, Callback.CallbackType callbackType);
-    event CallbackExecuted(uint256 indexed callbackPromiseId, bool success, bytes returnData);
+    event CallbackRegistered(bytes32 indexed callbackPromiseId, bytes32 indexed parentPromiseId, Callback.CallbackType callbackType);
+    event CallbackExecuted(bytes32 indexed callbackPromiseId, bool success, bytes returnData);
 
     function setUp() public {
         promiseContract = new Promise(address(0));
@@ -31,14 +31,14 @@ contract CallbackTest is Test {
         test_setUp();
         
         vm.prank(alice);
-        uint256 parentPromiseId = promiseContract.create();
-        uint256 expectedCallbackId = promiseContract.generatePromiseId(2);
+        bytes32 parentPromiseId = promiseContract.create();
+        bytes32 expectedCallbackId = promiseContract.generatePromiseId(bytes32(uint256(2)));
         
         vm.prank(bob);
         vm.expectEmit(true, true, false, true);
         emit CallbackRegistered(expectedCallbackId, parentPromiseId, Callback.CallbackType.Then);
         
-        uint256 callbackPromiseId = callbackContract.then(
+        bytes32 callbackPromiseId = callbackContract.then(
             parentPromiseId, 
             address(testTarget), 
             testTarget.handleSuccess.selector
@@ -60,14 +60,14 @@ contract CallbackTest is Test {
         test_setUp();
         
         vm.prank(alice);
-        uint256 parentPromiseId = promiseContract.create();
-        uint256 expectedCallbackId = promiseContract.generatePromiseId(2);
+        bytes32 parentPromiseId = promiseContract.create();
+        bytes32 expectedCallbackId = promiseContract.generatePromiseId(bytes32(uint256(2)));
         
         vm.prank(bob);
         vm.expectEmit(true, true, false, true);
         emit CallbackRegistered(expectedCallbackId, parentPromiseId, Callback.CallbackType.Catch);
         
-        uint256 callbackPromiseId = callbackContract.catchError(
+        bytes32 callbackPromiseId = callbackContract.catchError(
             parentPromiseId, 
             address(testTarget), 
             testTarget.handleError.selector
@@ -86,8 +86,8 @@ contract CallbackTest is Test {
         test_setUp();
         
         // Should now be able to create callbacks for non-existent promises (for cross-chain compatibility)
-        uint256 callback1 = callbackContract.then(999, address(testTarget), testTarget.handleSuccess.selector);
-        uint256 callback2 = callbackContract.catchError(999, address(testTarget), testTarget.handleError.selector);
+        bytes32 callback1 = callbackContract.then(bytes32(uint256(999)), address(testTarget), testTarget.handleSuccess.selector);
+        bytes32 callback2 = callbackContract.catchError(bytes32(uint256(999)), address(testTarget), testTarget.handleError.selector);
         
         // Callbacks should exist even though parent promise doesn't exist locally
         assertTrue(callbackContract.exists(callback1), "Then callback should exist for non-existent promise");
@@ -99,12 +99,12 @@ contract CallbackTest is Test {
         
         // Verify callback data is stored correctly
         Callback.CallbackData memory data1 = callbackContract.getCallback(callback1);
-        assertEq(data1.parentPromiseId, 999, "Parent promise ID should match");
+        assertEq(data1.parentPromiseId, bytes32(uint256(999)), "Parent promise ID should match");
         assertEq(data1.target, address(testTarget), "Target should match");
         assertEq(uint256(data1.callbackType), uint256(Callback.CallbackType.Then), "Should be Then callback");
         
         Callback.CallbackData memory data2 = callbackContract.getCallback(callback2);
-        assertEq(data2.parentPromiseId, 999, "Parent promise ID should match");
+        assertEq(data2.parentPromiseId, bytes32(uint256(999)), "Parent promise ID should match");
         assertEq(uint256(data2.callbackType), uint256(Callback.CallbackType.Catch), "Should be Catch callback");
     }
 
@@ -113,11 +113,11 @@ contract CallbackTest is Test {
         
         // Create parent promise
         vm.prank(alice);
-        uint256 parentPromiseId = promiseContract.create();
+        bytes32 parentPromiseId = promiseContract.create();
         
         // Create then callback
         vm.prank(bob);
-        uint256 callbackPromiseId = callbackContract.then(
+        bytes32 callbackPromiseId = callbackContract.then(
             parentPromiseId, 
             address(testTarget), 
             testTarget.handleSuccess.selector
@@ -157,11 +157,11 @@ contract CallbackTest is Test {
         
         // Create parent promise
         vm.prank(alice);
-        uint256 parentPromiseId = promiseContract.create();
+        bytes32 parentPromiseId = promiseContract.create();
         
         // Create catch callback
         vm.prank(bob);
-        uint256 callbackPromiseId = callbackContract.catchError(
+        bytes32 callbackPromiseId = callbackContract.catchError(
             parentPromiseId, 
             address(testTarget), 
             testTarget.handleError.selector
@@ -190,10 +190,10 @@ contract CallbackTest is Test {
         
         // Create parent promise and then callback
         vm.prank(alice);
-        uint256 parentPromiseId = promiseContract.create();
+        bytes32 parentPromiseId = promiseContract.create();
         
         vm.prank(bob);
-        uint256 callbackPromiseId = callbackContract.then(
+        bytes32 callbackPromiseId = callbackContract.then(
             parentPromiseId, 
             address(testTarget), 
             testTarget.handleSuccess.selector
@@ -221,10 +221,10 @@ contract CallbackTest is Test {
         
         // Create parent promise and catch callback
         vm.prank(alice);
-        uint256 parentPromiseId = promiseContract.create();
+        bytes32 parentPromiseId = promiseContract.create();
         
         vm.prank(bob);
-        uint256 callbackPromiseId = callbackContract.catchError(
+        bytes32 callbackPromiseId = callbackContract.catchError(
             parentPromiseId, 
             address(testTarget), 
             testTarget.handleError.selector
@@ -252,10 +252,10 @@ contract CallbackTest is Test {
         
         // Create parent promise and callback
         vm.prank(alice);
-        uint256 parentPromiseId = promiseContract.create();
+        bytes32 parentPromiseId = promiseContract.create();
         
         vm.prank(bob);
-        uint256 callbackPromiseId = callbackContract.then(
+        bytes32 callbackPromiseId = callbackContract.then(
             parentPromiseId, 
             address(testTarget), 
             testTarget.handleSuccess.selector
@@ -268,7 +268,7 @@ contract CallbackTest is Test {
 
     function test_cannotResolveNonExistentCallback() public {
         vm.expectRevert("Callback: callback does not exist");
-        callbackContract.resolve(999);
+        callbackContract.resolve(bytes32(uint256(999)));
     }
 
     function test_cannotResolveAlreadySettledCallback() public {
@@ -276,10 +276,10 @@ contract CallbackTest is Test {
         
         // Create and resolve a callback
         vm.prank(alice);
-        uint256 parentPromiseId = promiseContract.create();
+        bytes32 parentPromiseId = promiseContract.create();
         
         vm.prank(bob);
-        uint256 callbackPromiseId = callbackContract.then(
+        bytes32 callbackPromiseId = callbackContract.then(
             parentPromiseId, 
             address(testTarget), 
             testTarget.handleSuccess.selector
@@ -300,10 +300,10 @@ contract CallbackTest is Test {
         
         // Create parent promise and callback to failing function
         vm.prank(alice);
-        uint256 parentPromiseId = promiseContract.create();
+        bytes32 parentPromiseId = promiseContract.create();
         
         vm.prank(bob);
-        uint256 callbackPromiseId = callbackContract.then(
+        bytes32 callbackPromiseId = callbackContract.then(
             parentPromiseId, 
             address(testTarget), 
             testTarget.alwaysFails.selector
@@ -325,15 +325,15 @@ contract CallbackTest is Test {
         
         // Create parent promise
         vm.prank(alice);
-        uint256 parentPromiseId = promiseContract.create();
+        bytes32 parentPromiseId = promiseContract.create();
         
         // Create multiple callbacks
         vm.prank(bob);
-        uint256 callback1 = callbackContract.then(parentPromiseId, address(testTarget), testTarget.handleSuccess.selector);
+        bytes32 callback1 = callbackContract.then(parentPromiseId, address(testTarget), testTarget.handleSuccess.selector);
         
         TestTarget testTarget2 = new TestTarget();
         vm.prank(bob);
-        uint256 callback2 = callbackContract.then(parentPromiseId, address(testTarget2), testTarget2.handleSuccess.selector);
+        bytes32 callback2 = callbackContract.then(parentPromiseId, address(testTarget2), testTarget2.handleSuccess.selector);
         
         // Resolve parent promise
         vm.prank(alice);
@@ -359,12 +359,12 @@ contract CallbackTest is Test {
     }
 
     function test_getCallbackForNonExistentCallback() public {
-        Callback.CallbackData memory data = callbackContract.getCallback(999);
+        Callback.CallbackData memory data = callbackContract.getCallback(bytes32(uint256(999)));
         assertEq(data.target, address(0), "Non-existent callback should return empty data");
     }
 
     function test_existsForNonExistentCallback() public {
-        assertFalse(callbackContract.exists(999), "Non-existent callback should not exist");
+        assertFalse(callbackContract.exists(bytes32(uint256(999))), "Non-existent callback should not exist");
     }
 
     function test_authTrackingForLocalCallbacks() public {
@@ -372,11 +372,11 @@ contract CallbackTest is Test {
         
         // Create parent promise
         vm.prank(alice);
-        uint256 parentPromiseId = promiseContract.create();
+        bytes32 parentPromiseId = promiseContract.create();
         
         // Register then callback as bob
         vm.prank(bob);
-        uint256 thenCallbackId = callbackContract.then(
+        bytes32 thenCallbackId = callbackContract.then(
             parentPromiseId,
             address(testTarget),
             testTarget.handleSuccess.selector
@@ -384,7 +384,7 @@ contract CallbackTest is Test {
         
         // Register catch callback as alice
         vm.prank(alice);
-        uint256 catchCallbackId = callbackContract.catchError(
+        bytes32 catchCallbackId = callbackContract.catchError(
             parentPromiseId,
             address(testTarget),
             testTarget.handleError.selector

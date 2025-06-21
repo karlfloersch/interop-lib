@@ -13,7 +13,7 @@ contract PromiseHarness {
     /// @notice Structure to hold resolvable promises
     struct ResolvablePromise {
         IResolvable resolvableContract;
-        uint256 promiseId;
+        bytes32 promiseId;
     }
 
     /// @notice Event emitted when promises are resolved
@@ -36,7 +36,7 @@ contract PromiseHarness {
         uint256 resolvableCount = 0;
 
         for (uint256 i = 1; i <= maxPromiseId; i++) {
-            uint256 globalPromiseId = promiseContract.generatePromiseId(i);
+            bytes32 globalPromiseId = promiseContract.generatePromiseId(bytes32(i));
             if (!promiseContract.exists(globalPromiseId)) continue;
 
             for (uint256 j = 0; j < resolvableContracts.length; j++) {
@@ -66,7 +66,7 @@ contract PromiseHarness {
     /// @notice Resolve all pending promises up to the current max promise ID (one layer only)
     /// @return promisesResolved Number of promises resolved
     function resolveAllPendingAuto() external returns (uint256 promisesResolved) {
-        uint256 maxPromiseId = promiseContract.getNextPromiseId() - 1;
+        uint256 maxPromiseId = promiseContract.getNonce() - 1;
         return this.resolveAllPending(maxPromiseId);
     }
 
@@ -102,7 +102,7 @@ contract PromiseHarness {
         pendingPromises = 0;
 
         for (uint256 i = 1; i <= maxPromiseId; i++) {
-            uint256 globalPromiseId = promiseContract.generatePromiseId(i);
+            bytes32 globalPromiseId = promiseContract.generatePromiseId(bytes32(i));
             if (!promiseContract.exists(globalPromiseId)) continue;
 
             for (uint256 j = 0; j < resolvableContracts.length; j++) {
@@ -117,7 +117,7 @@ contract PromiseHarness {
     /// @notice Check how many promises are pending resolution (auto max ID)
     /// @return pendingPromises Number of pending promises
     function countPendingAuto() external view returns (uint256 pendingPromises) {
-        uint256 maxPromiseId = promiseContract.getNextPromiseId() - 1;
+        uint256 maxPromiseId = promiseContract.getNonce() - 1;
         return this.countPending(maxPromiseId);
     }
 
@@ -128,7 +128,7 @@ contract PromiseHarness {
         statuses = new uint8[](maxPromiseId);
         
         for (uint256 i = 1; i <= maxPromiseId; i++) {
-            uint256 globalPromiseId = promiseContract.generatePromiseId(i);
+            bytes32 globalPromiseId = promiseContract.generatePromiseId(bytes32(i));
             if (promiseContract.exists(globalPromiseId)) {
                 statuses[i-1] = uint8(promiseContract.status(globalPromiseId));
             } else {

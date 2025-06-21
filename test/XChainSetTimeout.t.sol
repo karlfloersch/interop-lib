@@ -60,7 +60,7 @@ contract XChainSetTimeoutTest is Test, Relayer {
         vm.selectFork(forkIds[0]);
         
         // Create timeout promise on Chain A
-        uint256 timeoutPromise = setTimeoutA.create(block.timestamp + 100);
+        bytes32 timeoutPromise = setTimeoutA.create(block.timestamp + 100);
         
         // Create target contract on Chain B
         vm.selectFork(forkIds[1]);
@@ -69,7 +69,7 @@ contract XChainSetTimeoutTest is Test, Relayer {
         // Register callback on Chain A that targets Chain B when timeout resolves
         vm.selectFork(forkIds[0]);
         uint256 chainBId = chainIdByForkId[forkIds[1]];
-        uint256 callbackPromise = callbackA.thenOn(
+        bytes32 callbackPromise = callbackA.thenOn(
             chainBId,
             timeoutPromise,
             address(target),
@@ -114,7 +114,7 @@ contract XChainSetTimeoutTest is Test, Relayer {
         vm.selectFork(forkIds[0]);
         
         // Create timeout promise on Chain A
-        uint256 timeoutPromise = setTimeoutA.create(block.timestamp + 100);
+        bytes32 timeoutPromise = setTimeoutA.create(block.timestamp + 100);
         uint256 chainBId = chainIdByForkId[forkIds[1]];
         
         // Note: SetTimeout doesn't have cross-chain functionality for sharing timeout mappings,
@@ -148,9 +148,9 @@ contract XChainSetTimeoutTest is Test, Relayer {
         vm.selectFork(forkIds[0]);
         
         // Create multiple timeout promises on Chain A with different delays
-        uint256 timeout1 = setTimeoutA.create(block.timestamp + 50);
-        uint256 timeout2 = setTimeoutA.create(block.timestamp + 100);
-        uint256 timeout3 = setTimeoutA.create(block.timestamp + 150);
+        bytes32 timeout1 = setTimeoutA.create(block.timestamp + 50);
+        bytes32 timeout2 = setTimeoutA.create(block.timestamp + 100);
+        bytes32 timeout3 = setTimeoutA.create(block.timestamp + 150);
         
         // Create target contracts on Chain B
         vm.selectFork(forkIds[1]);
@@ -161,9 +161,9 @@ contract XChainSetTimeoutTest is Test, Relayer {
         // Register callbacks on Chain A that target Chain B for all timeouts
         vm.selectFork(forkIds[0]);
         uint256 chainBId = chainIdByForkId[forkIds[1]];
-        uint256 callback1 = callbackA.thenOn(chainBId, timeout1, address(target1), target1.handleTimeout.selector);
-        uint256 callback2 = callbackA.thenOn(chainBId, timeout2, address(target2), target2.handleTimeout.selector);
-        uint256 callback3 = callbackA.thenOn(chainBId, timeout3, address(target3), target3.handleTimeout.selector);
+        bytes32 callback1 = callbackA.thenOn(chainBId, timeout1, address(target1), target1.handleTimeout.selector);
+        bytes32 callback2 = callbackA.thenOn(chainBId, timeout2, address(target2), target2.handleTimeout.selector);
+        bytes32 callback3 = callbackA.thenOn(chainBId, timeout3, address(target3), target3.handleTimeout.selector);
         
         // Relay callback registrations
         relayAllMessages();
@@ -214,15 +214,15 @@ contract XChainSetTimeoutTest is Test, Relayer {
         vm.selectFork(forkIds[0]);
         
         // Create timeout on Chain A
-        uint256 timeoutPromise = setTimeoutA.create(block.timestamp + 100);
+        bytes32 timeoutPromise = setTimeoutA.create(block.timestamp + 100);
         
         // Verify the promise ID is a global hash-based ID
-        uint256 expectedGlobalId = promiseA.generateGlobalPromiseId(chainIdByForkId[forkIds[0]], 1);
+        bytes32 expectedGlobalId = promiseA.generateGlobalPromiseId(chainIdByForkId[forkIds[0]], bytes32(uint256(1)));
         assertEq(timeoutPromise, expectedGlobalId, "Timeout promise should have global ID");
         
         // Verify that the same global ID would be generated on Chain B
         vm.selectFork(forkIds[1]);
-        uint256 sameGlobalId = promiseB.generateGlobalPromiseId(chainIdByForkId[forkIds[0]], 1);
+        bytes32 sameGlobalId = promiseB.generateGlobalPromiseId(chainIdByForkId[forkIds[0]], bytes32(uint256(1)));
         assertEq(timeoutPromise, sameGlobalId, "Promise ID should be globally consistent across chains");
         
         // Resolve the timeout and then share it to verify cross-chain functionality

@@ -42,23 +42,23 @@ contract PromiseAllE2ETest is Test {
     function test_promiseAllWithHarnessAutomation() public {
         // Create some timeout promises that will be combined with PromiseAll
         vm.prank(alice);
-        uint256 timeout1 = setTimeoutContract.create(block.timestamp + 100);
+        bytes32 timeout1 = setTimeoutContract.create(block.timestamp + 100);
         
         vm.prank(alice);  
-        uint256 timeout2 = setTimeoutContract.create(block.timestamp + 150);
+        bytes32 timeout2 = setTimeoutContract.create(block.timestamp + 150);
         
         // Create a PromiseAll that waits for both timeouts
-        uint256[] memory inputPromises = new uint256[](2);
+        bytes32[] memory inputPromises = new bytes32[](2);
         inputPromises[0] = timeout1;
         inputPromises[1] = timeout2;
         
         vm.prank(bob);
-        uint256 promiseAllId = promiseAllContract.create(inputPromises);
+        bytes32 promiseAllId = promiseAllContract.create(inputPromises);
         
         // Create a callback on the PromiseAll result
         TestTarget target = new TestTarget();
         vm.prank(alice);
-        uint256 finalCallback = callbackContract.then(promiseAllId, address(target), target.handlePromiseAllResult.selector);
+        bytes32 finalCallback = callbackContract.then(promiseAllId, address(target), target.handlePromiseAllResult.selector);
         
         // Initially nothing is resolvable
         uint256 pending = harness.countPendingAuto();
@@ -115,24 +115,24 @@ contract PromiseAllE2ETest is Test {
     function test_promiseAllWithFailureAndHarness() public {
         // Create a manual promise (will be rejected)
         vm.prank(alice);
-        uint256 manualPromise = promiseContract.create();
+        bytes32 manualPromise = promiseContract.create();
         
         // Create a timeout promise (will be resolved)
         vm.prank(alice);
-        uint256 timeoutPromise = setTimeoutContract.create(block.timestamp + 100);
+        bytes32 timeoutPromise = setTimeoutContract.create(block.timestamp + 100);
         
         // Create PromiseAll 
-        uint256[] memory inputPromises = new uint256[](2);
+        bytes32[] memory inputPromises = new bytes32[](2);
         inputPromises[0] = manualPromise;
         inputPromises[1] = timeoutPromise;
         
         vm.prank(bob);
-        uint256 promiseAllId = promiseAllContract.create(inputPromises);
+        bytes32 promiseAllId = promiseAllContract.create(inputPromises);
         
         // Create an error handler callback
         ErrorTarget errorTarget = new ErrorTarget();
         vm.prank(alice);
-        uint256 errorCallback = callbackContract.catchError(promiseAllId, address(errorTarget), errorTarget.handleError.selector);
+        bytes32 errorCallback = callbackContract.catchError(promiseAllId, address(errorTarget), errorTarget.handleError.selector);
         
         // Reject the manual promise first (should make PromiseAll resolvable immediately)
         vm.prank(alice);
@@ -172,26 +172,26 @@ contract PromiseAllE2ETest is Test {
         
         // 1. Create initial timeout promise
         vm.prank(alice);
-        uint256 timeoutPromise = setTimeoutContract.create(block.timestamp + 100);
+        bytes32 timeoutPromise = setTimeoutContract.create(block.timestamp + 100);
         
         // 2. Create two parallel callbacks on the timeout
         vm.prank(alice);
-        uint256 callback1 = callbackContract.then(timeoutPromise, address(processor1), processor1.processData.selector);
+        bytes32 callback1 = callbackContract.then(timeoutPromise, address(processor1), processor1.processData.selector);
         
         vm.prank(alice);
-        uint256 callback2 = callbackContract.then(timeoutPromise, address(processor2), processor2.processData.selector);
+        bytes32 callback2 = callbackContract.then(timeoutPromise, address(processor2), processor2.processData.selector);
         
         // 3. Create PromiseAll that waits for both callbacks to complete
-        uint256[] memory callbackPromises = new uint256[](2);
+        bytes32[] memory callbackPromises = new bytes32[](2);
         callbackPromises[0] = callback1;
         callbackPromises[1] = callback2;
         
         vm.prank(bob);
-        uint256 promiseAllId = promiseAllContract.create(callbackPromises);
+        bytes32 promiseAllId = promiseAllContract.create(callbackPromises);
         
         // 4. Create final callback that triggers only after PromiseAll resolves
         vm.prank(alice);
-        uint256 finalCallback = callbackContract.then(promiseAllId, address(aggregator), aggregator.aggregateResults.selector);
+        bytes32 finalCallback = callbackContract.then(promiseAllId, address(aggregator), aggregator.aggregateResults.selector);
         
         // 5. Initially nothing is resolvable
         uint256 pending = harness.countPendingAuto();

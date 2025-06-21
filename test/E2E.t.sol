@@ -42,14 +42,14 @@ contract E2ETest is Test {
         
         // 1. Create a SetTimeout promise that resolves in 100 seconds
         vm.prank(alice);
-        uint256 timeoutPromise = setTimeoutContract.create(block.timestamp + 100);
+        bytes32 timeoutPromise = setTimeoutContract.create(block.timestamp + 100);
         
         // 2. Register callbacks on the timeout promise
         vm.prank(bob);
-        uint256 callback1 = callbackContract.then(timeoutPromise, address(target1), target1.onTimeout.selector);
+        bytes32 callback1 = callbackContract.then(timeoutPromise, address(target1), target1.onTimeout.selector);
         
         vm.prank(charlie);
-        uint256 callback2 = callbackContract.then(timeoutPromise, address(target2), target2.onTimeout.selector);
+        bytes32 callback2 = callbackContract.then(timeoutPromise, address(target2), target2.onTimeout.selector);
         
         // 3. Initially, nothing should be resolvable
         uint256 pendingPromises = harness.countPendingAuto();
@@ -97,11 +97,11 @@ contract E2ETest is Test {
         
         // 1. Create initial timeout
         vm.prank(alice);
-        uint256 timeoutPromise = setTimeoutContract.create(block.timestamp + 100);
+        bytes32 timeoutPromise = setTimeoutContract.create(block.timestamp + 100);
         
         // 2. Chain target will create a new promise when called
         vm.prank(bob);
-        uint256 chainCallback = callbackContract.then(timeoutPromise, address(chainTarget), chainTarget.createNewPromise.selector);
+        bytes32 chainCallback = callbackContract.then(timeoutPromise, address(chainTarget), chainTarget.createNewPromise.selector);
         
         // 3. Fast forward and resolve initial timeout
         vm.warp(block.timestamp + 150);
@@ -110,12 +110,12 @@ contract E2ETest is Test {
         
         // 4. ChainTarget should have been called and created a new promise
         assertTrue(chainTarget.called(), "Chain target should have been called");
-        uint256 newPromiseId = chainTarget.createdPromiseId();
-        assertTrue(newPromiseId > 0, "Should have created a new promise");
+        bytes32 newPromiseId = chainTarget.createdPromiseId();
+        assertTrue(newPromiseId != bytes32(0), "Should have created a new promise");
         
         // 5. Register callback on the new promise
         vm.prank(charlie);
-        uint256 finalCallback = callbackContract.then(newPromiseId, address(finalTarget), finalTarget.onTimeout.selector);
+        bytes32 finalCallback = callbackContract.then(newPromiseId, address(finalTarget), finalTarget.onTimeout.selector);
         
         // 6. Manually resolve the new promise
         vm.prank(address(chainTarget));
@@ -137,13 +137,13 @@ contract E2ETest is Test {
         
         // Create timeouts with staggered delays
         vm.prank(alice);
-        uint256 timeout1 = setTimeoutContract.create(block.timestamp + 50);  // Resolves first
+        bytes32 timeout1 = setTimeoutContract.create(block.timestamp + 50);  // Resolves first
         
         vm.prank(alice);
-        uint256 timeout2 = setTimeoutContract.create(block.timestamp + 100); // Resolves second
+        bytes32 timeout2 = setTimeoutContract.create(block.timestamp + 100); // Resolves second
         
         vm.prank(alice);
-        uint256 timeout3 = setTimeoutContract.create(block.timestamp + 150); // Resolves third
+        bytes32 timeout3 = setTimeoutContract.create(block.timestamp + 150); // Resolves third
         
         // Register callbacks
         vm.prank(bob);
@@ -198,14 +198,14 @@ contract E2ETest is Test {
         
         // Create timeout
         vm.prank(alice);
-        uint256 timeoutPromise = setTimeoutContract.create(block.timestamp + 100);
+        bytes32 timeoutPromise = setTimeoutContract.create(block.timestamp + 100);
         
         // Register callbacks - one that fails, one that succeeds
         vm.prank(bob);
-        uint256 failingCallback = callbackContract.then(timeoutPromise, address(failingTarget), failingTarget.alwaysFails.selector);
+        bytes32 failingCallback = callbackContract.then(timeoutPromise, address(failingTarget), failingTarget.alwaysFails.selector);
         
         vm.prank(bob);
-        uint256 normalCallback = callbackContract.then(timeoutPromise, address(normalTarget), normalTarget.onTimeout.selector);
+        bytes32 normalCallback = callbackContract.then(timeoutPromise, address(normalTarget), normalTarget.onTimeout.selector);
         
         // Resolve timeout first
         vm.warp(block.timestamp + 150);
@@ -222,7 +222,7 @@ contract E2ETest is Test {
         
         // Now register a catch callback on the failing callback (which is now rejected)
         vm.prank(charlie);
-        uint256 errorCallback = callbackContract.catchError(failingCallback, address(errorTarget), errorTarget.handleError.selector);
+        bytes32 errorCallback = callbackContract.catchError(failingCallback, address(errorTarget), errorTarget.handleError.selector);
         
         // Error callback should be resolvable now since failingCallback is rejected
         assertTrue(callbackContract.canResolve(errorCallback), "Error callback should be resolvable");
@@ -243,21 +243,21 @@ contract E2ETest is Test {
         
         // 1. Create multiple timeouts
         vm.prank(alice);
-        uint256 shortTimeout = setTimeoutContract.create(block.timestamp + 50);
+        bytes32 shortTimeout = setTimeoutContract.create(block.timestamp + 50);
         
         vm.prank(alice);
-        uint256 longTimeout = setTimeoutContract.create(block.timestamp + 200);
+        bytes32 longTimeout = setTimeoutContract.create(block.timestamp + 200);
         
         // 2. Register callbacks on short timeout
         vm.prank(bob);
-        uint256 simpleCallback = callbackContract.then(shortTimeout, address(target1), target1.onTimeout.selector);
+        bytes32 simpleCallback = callbackContract.then(shortTimeout, address(target1), target1.onTimeout.selector);
         
         vm.prank(bob);
-        uint256 chainingCallback = callbackContract.then(shortTimeout, address(chainTarget), chainTarget.createNewPromise.selector);
+        bytes32 chainingCallback = callbackContract.then(shortTimeout, address(chainTarget), chainTarget.createNewPromise.selector);
         
         // 3. Also register callback on long timeout
         vm.prank(charlie);
-        uint256 laterCallback = callbackContract.then(longTimeout, address(finalTarget), finalTarget.onTimeout.selector);
+        bytes32 laterCallback = callbackContract.then(longTimeout, address(finalTarget), finalTarget.onTimeout.selector);
         
         // 4. Start with everything pending
         uint8[] memory initialStatuses = harness.getAllPromiseStatuses(5);
@@ -280,7 +280,7 @@ contract E2ETest is Test {
         assertFalse(finalTarget.called(), "Final target should not be called yet");
         
         // 7. Chain target created a new promise - register callback on it
-        uint256 newPromise = chainTarget.createdPromiseId();
+        bytes32 newPromise = chainTarget.createdPromiseId();
         vm.prank(alice);
         callbackContract.then(newPromise, address(finalTarget), finalTarget.onTimeout.selector);
         
@@ -332,14 +332,14 @@ contract SimpleTarget {
 /// @notice Target that creates a new promise when called
 contract ChainTarget {
     bool public called;
-    uint256 public createdPromiseId;
+    bytes32 public createdPromiseId;
     Promise public promiseContract;
     
     constructor(address _promiseContract) {
         promiseContract = Promise(_promiseContract);
     }
     
-    function createNewPromise(bytes memory) external returns (uint256) {
+    function createNewPromise(bytes memory) external returns (bytes32) {
         called = true;
         createdPromiseId = promiseContract.create();
         return createdPromiseId;

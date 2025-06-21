@@ -60,23 +60,23 @@ contract XChainPromiseAllTest is Test, Relayer {
         vm.selectFork(forkIds[0]);
         
         // Create promises on Chain A
-        uint256 promiseA1 = promiseA.create();
-        uint256 promiseA2 = promiseA.create();
+        bytes32 promiseA1 = promiseA.create();
+        bytes32 promiseA2 = promiseA.create();
         
         // Create promises on Chain B
         vm.selectFork(forkIds[1]);
-        uint256 promiseB1 = promiseB.create();
-        uint256 promiseB2 = promiseB.create();
+        bytes32 promiseB1 = promiseB.create();
+        bytes32 promiseB2 = promiseB.create();
         
         // Create PromiseAll on Chain A that watches promises from both chains
         vm.selectFork(forkIds[0]);
-        uint256[] memory inputPromises = new uint256[](4);
+        bytes32[] memory inputPromises = new bytes32[](4);
         inputPromises[0] = promiseA1;  // Local to Chain A
         inputPromises[1] = promiseA2;  // Local to Chain A  
         inputPromises[2] = promiseB1;  // From Chain B (doesn't exist on A yet)
         inputPromises[3] = promiseB2;  // From Chain B (doesn't exist on A yet)
         
-        uint256 promiseAllId = promiseAllA.create(inputPromises);
+        bytes32 promiseAllId = promiseAllA.create(inputPromises);
         
         // Verify PromiseAll was created and is not resolvable yet
         assertTrue(promiseAllA.exists(promiseAllId), "PromiseAll should exist");
@@ -132,15 +132,15 @@ contract XChainPromiseAllTest is Test, Relayer {
         vm.selectFork(forkIds[0]);
         
         // Create local promises on Chain A
-        uint256 promise1 = promiseA.create();
-        uint256 promise2 = promiseA.create();
+        bytes32 promise1 = promiseA.create();
+        bytes32 promise2 = promiseA.create();
         
-        uint256[] memory inputPromises = new uint256[](2);
+        bytes32[] memory inputPromises = new bytes32[](2);
         inputPromises[0] = promise1;
         inputPromises[1] = promise2;
         
         // Create PromiseAll on Chain A
-        uint256 promiseAllId = promiseAllA.create(inputPromises);
+        bytes32 promiseAllId = promiseAllA.create(inputPromises);
         
         // Resolve all promises
         promiseA.resolve(promise1, abi.encode("Local Result 1"));
@@ -173,15 +173,15 @@ contract XChainPromiseAllTest is Test, Relayer {
         vm.selectFork(forkIds[0]);
         
         // Create promises on Chain A
-        uint256 promise1 = promiseA.create();
-        uint256 promise2 = promiseA.create();
+        bytes32 promise1 = promiseA.create();
+        bytes32 promise2 = promiseA.create();
         
-        uint256[] memory inputPromises = new uint256[](2);
+        bytes32[] memory inputPromises = new bytes32[](2);
         inputPromises[0] = promise1;
         inputPromises[1] = promise2;
         
         // Create PromiseAll on Chain A
-        uint256 promiseAllId = promiseAllA.create(inputPromises);
+        bytes32 promiseAllId = promiseAllA.create(inputPromises);
         
         // Create target contract on Chain B
         vm.selectFork(forkIds[1]);
@@ -190,7 +190,7 @@ contract XChainPromiseAllTest is Test, Relayer {
         // Register cross-chain callback from Chain A to Chain B
         vm.selectFork(forkIds[0]);
         uint256 chainBId = chainIdByForkId[forkIds[1]];
-        uint256 callbackPromise = callbackA.thenOn(
+        bytes32 callbackPromise = callbackA.thenOn(
             chainBId,
             promiseAllId,
             address(target),
@@ -228,13 +228,13 @@ contract XChainPromiseAllTest is Test, Relayer {
         vm.selectFork(forkIds[0]);
         
         // Create local promises on Chain A
-        uint256 localPromise1 = promiseA.create();
-        uint256 localPromise2 = promiseA.create();
+        bytes32 localPromise1 = promiseA.create();
+        bytes32 localPromise2 = promiseA.create();
         
         // Create promises on Chain B and share one immediately  
         vm.selectFork(forkIds[1]);
-        uint256 remotePromise1 = promiseB.create();
-        uint256 remotePromise2 = promiseB.create();
+        bytes32 remotePromise1 = promiseB.create();
+        bytes32 remotePromise2 = promiseB.create();
         
         // Resolve and share one remote promise early
         promiseB.resolve(remotePromise1, abi.encode("Early Remote Result"));
@@ -244,13 +244,13 @@ contract XChainPromiseAllTest is Test, Relayer {
         
         // Create PromiseAll on Chain A with mix of local, shared, and not-yet-shared promises
         vm.selectFork(forkIds[0]);
-        uint256[] memory inputPromises = new uint256[](4);
+        bytes32[] memory inputPromises = new bytes32[](4);
         inputPromises[0] = localPromise1;    // Local pending
         inputPromises[1] = localPromise2;    // Local pending  
         inputPromises[2] = remotePromise1;   // Remote resolved & shared
         inputPromises[3] = remotePromise2;   // Remote not shared yet
         
-        uint256 promiseAllId = promiseAllA.create(inputPromises);
+        bytes32 promiseAllId = promiseAllA.create(inputPromises);
         
         // Check initial status - 1 already resolved (the shared one)
         (uint256 resolvedCount, uint256 totalCount, bool settled) = promiseAllA.getStatus(promiseAllId);
@@ -293,18 +293,18 @@ contract XChainPromiseAllTest is Test, Relayer {
         vm.selectFork(forkIds[0]);
         
         // Create promises on both chains
-        uint256 localPromise = promiseA.create();
+        bytes32 localPromise = promiseA.create();
         
         vm.selectFork(forkIds[1]);
-        uint256 remotePromise = promiseB.create();
+        bytes32 remotePromise = promiseB.create();
         
         // Create PromiseAll on Chain A
         vm.selectFork(forkIds[0]);
-        uint256[] memory inputPromises = new uint256[](2);
+        bytes32[] memory inputPromises = new bytes32[](2);
         inputPromises[0] = localPromise;
         inputPromises[1] = remotePromise;
         
-        uint256 promiseAllId = promiseAllA.create(inputPromises);
+        bytes32 promiseAllId = promiseAllA.create(inputPromises);
         
         // Resolve local promise successfully
         promiseA.resolve(localPromise, abi.encode("Local Success"));
@@ -341,15 +341,15 @@ contract XChainPromiseAllTest is Test, Relayer {
         vm.selectFork(forkIds[0]);
         
         // Create promise on Chain A
-        uint256 promiseOnA = promiseA.create();
+        bytes32 promiseOnA = promiseA.create();
         
         // Create promise on Chain B  
         vm.selectFork(forkIds[1]);
-        uint256 promiseOnB = promiseB.create();
+        bytes32 promiseOnB = promiseB.create();
         
         // Verify these are global hash-based IDs, not sequential
-        uint256 expectedGlobalIdA = promiseA.generateGlobalPromiseId(chainIdByForkId[forkIds[0]], 1);
-        uint256 expectedGlobalIdB = promiseB.generateGlobalPromiseId(chainIdByForkId[forkIds[1]], 1);
+        bytes32 expectedGlobalIdA = promiseA.generateGlobalPromiseId(chainIdByForkId[forkIds[0]], bytes32(uint256(1)));
+        bytes32 expectedGlobalIdB = promiseB.generateGlobalPromiseId(chainIdByForkId[forkIds[1]], bytes32(uint256(1)));
         
         vm.selectFork(forkIds[0]);
         assertEq(promiseOnA, expectedGlobalIdA, "Chain A promise should have global ID");
@@ -362,14 +362,14 @@ contract XChainPromiseAllTest is Test, Relayer {
         
         // Create PromiseAll on Chain A using both global IDs
         vm.selectFork(forkIds[0]);
-        uint256[] memory inputPromises = new uint256[](2);
+        bytes32[] memory inputPromises = new bytes32[](2);
         inputPromises[0] = promiseOnA;  // Local global ID
         inputPromises[1] = promiseOnB;  // Remote global ID
         
-        uint256 promiseAllId = promiseAllA.create(inputPromises);
+        bytes32 promiseAllId = promiseAllA.create(inputPromises);
         
         // Verify PromiseAll contains the correct global IDs
-        uint256[] memory retrievedInputs = promiseAllA.getInputPromises(promiseAllId);
+        bytes32[] memory retrievedInputs = promiseAllA.getInputPromises(promiseAllId);
         assertEq(retrievedInputs.length, 2, "Should have 2 input promises");
         assertEq(retrievedInputs[0], expectedGlobalIdA, "First input should be global ID A");
         assertEq(retrievedInputs[1], expectedGlobalIdB, "Second input should be global ID B");
@@ -399,19 +399,19 @@ contract XChainPromiseAllTest is Test, Relayer {
         vm.selectFork(forkIds[0]);
         
         // Create one local promise
-        uint256 localPromise = promiseA.create();
+        bytes32 localPromise = promiseA.create();
         
         // Use fake promise IDs that could represent cross-chain promises not yet shared
-        uint256 fakePromise1 = 999999;
-        uint256 fakePromise2 = 888888;
+        bytes32 fakePromise1 = bytes32(uint256(999999));
+        bytes32 fakePromise2 = bytes32(uint256(888888));
         
-        uint256[] memory inputPromises = new uint256[](3);
+        bytes32[] memory inputPromises = new bytes32[](3);
         inputPromises[0] = localPromise;    // Real local promise
         inputPromises[1] = fakePromise1;    // Non-existent (could be cross-chain)
         inputPromises[2] = fakePromise2;    // Non-existent (could be cross-chain)
         
         // Should be able to create PromiseAll with non-existent promises
-        uint256 promiseAllId = promiseAllA.create(inputPromises);
+        bytes32 promiseAllId = promiseAllA.create(inputPromises);
         assertTrue(promiseAllA.exists(promiseAllId), "PromiseAll should exist with non-existent promises");
         
         // Should not be resolvable with non-existent promises (they appear as Pending)
