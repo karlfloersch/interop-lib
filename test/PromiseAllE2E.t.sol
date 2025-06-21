@@ -42,10 +42,10 @@ contract PromiseAllE2ETest is Test {
     function test_promiseAllWithHarnessAutomation() public {
         // Create some timeout promises that will be combined with PromiseAll
         vm.prank(alice);
-        bytes32 timeout1 = setTimeoutContract.create(block.timestamp + 100);
+        bytes32 timeout1 = setTimeoutContract.create(100);
         
         vm.prank(alice);  
-        bytes32 timeout2 = setTimeoutContract.create(block.timestamp + 150);
+        bytes32 timeout2 = setTimeoutContract.create(150);
         
         // Create a PromiseAll that waits for both timeouts
         bytes32[] memory inputPromises = new bytes32[](2);
@@ -119,7 +119,7 @@ contract PromiseAllE2ETest is Test {
         
         // Create a timeout promise (will be resolved)
         vm.prank(alice);
-        bytes32 timeoutPromise = setTimeoutContract.create(block.timestamp + 100);
+        bytes32 timeoutPromise = setTimeoutContract.create(100);
         
         // Create PromiseAll 
         bytes32[] memory inputPromises = new bytes32[](2);
@@ -172,7 +172,7 @@ contract PromiseAllE2ETest is Test {
         
         // 1. Create initial timeout promise
         vm.prank(alice);
-        bytes32 timeoutPromise = setTimeoutContract.create(block.timestamp + 100);
+        bytes32 timeoutPromise = setTimeoutContract.create(100);
         
         // 2. Create two parallel callbacks on the timeout
         vm.prank(alice);

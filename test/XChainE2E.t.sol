@@ -408,7 +408,7 @@ contract XChainE2ETest is Test, Relayer {
         
         // **KEY DEMONSTRATION**: Chain B creates the timeout (the trigger)
         vm.selectFork(forkIds[1]);
-        bytes32 remoteTimeoutId = setTimeoutB.create(block.timestamp + 1800); // 30 minutes
+        bytes32 remoteTimeoutId = setTimeoutB.create(1800); // 30 minutes
         
         // **REMOTE PROMISE CALLBACKS**: Chain A creates callbacks for the remote timeout promise
         // This demonstrates the new functionality - callbacks for promises that don't exist locally
@@ -663,7 +663,7 @@ contract CronScheduler {
         });
         
         // Schedule the first execution
-        bytes32 firstTimeoutId = setTimeoutContract.create(block.timestamp + intervalSeconds);
+        bytes32 firstTimeoutId = setTimeoutContract.create(intervalSeconds);
         nextTimeoutIds[cycleId] = firstTimeoutId;
         
         // Store the timeout-to-cycle mapping for automatic execution
@@ -713,7 +713,7 @@ contract CronScheduler {
         );
         
         // **CRON MAGIC**: Schedule next execution automatically
-        bytes32 nextTimeoutId = setTimeoutContract.create(block.timestamp + cycle.interval);
+        bytes32 nextTimeoutId = setTimeoutContract.create(cycle.interval);
         
         // Store the timeout-to-cycle mapping for automatic execution
         timeoutToCycle[nextTimeoutId] = cycleId;
