@@ -54,7 +54,7 @@ contract XChainPromiseTest is Test, Relayer {
         assertEq(uint8(promiseA.status(promiseId)), uint8(Promise.PromiseStatus.Resolved));
         Promise.PromiseData memory data = promiseA.getPromise(promiseId);
         assertEq(data.returnData, abi.encode("Hello World"));
-        assertEq(data.creator, address(this));
+        assertEq(data.resolver, address(this));
     }
 
     /// @notice Test basic promise rejection on single chain
@@ -165,18 +165,18 @@ contract XChainPromiseTest is Test, Relayer {
         // Switch to Chain B and verify the promise was transferred
         vm.selectFork(forkIds[1]);
         Promise.PromiseData memory transferredPromise = promiseB.getPromise(promiseId);
-        assertEq(transferredPromise.creator, newResolver);
+        assertEq(transferredPromise.resolver, newResolver);
         assertEq(uint8(transferredPromise.status), uint8(Promise.PromiseStatus.Pending));
         assertTrue(promiseB.exists(promiseId));
         
         // Verify the promise is deleted on Chain A
         vm.selectFork(forkIds[0]);
         Promise.PromiseData memory deletedPromise = promiseA.getPromise(promiseId);
-        assertEq(deletedPromise.creator, address(0));
+        assertEq(deletedPromise.resolver, address(0));
         assertEq(uint8(deletedPromise.status), uint8(Promise.PromiseStatus.Pending));
         assertFalse(promiseA.exists(promiseId));
         
-        // Verify new creator can resolve on Chain B
+        // Verify new resolver can resolve on Chain B
         vm.selectFork(forkIds[1]);
         vm.prank(newResolver);
         promiseB.resolve(promiseId, abi.encode("Resolved on Chain B"));
@@ -201,8 +201,8 @@ contract XChainPromiseTest is Test, Relayer {
         promiseA.transferResolve(promiseId, chainAId, address(0x123));
     }
 
-    /// @notice Test that only creator can resolve/reject promises
-    function test_CreatorPermissions() public {
+    /// @notice Test that only resolver can resolve/reject promises
+    function test_ResolverPermissions() public {
         vm.selectFork(forkIds[0]);
         
         // Create a promise
@@ -210,15 +210,15 @@ contract XChainPromiseTest is Test, Relayer {
         
         // Try to resolve from wrong account (should revert)
         vm.prank(address(0x999));
-        vm.expectRevert("Promise: only creator can resolve");
+        vm.expectRevert("Promise: only resolver can resolve");
         promiseA.resolve(promiseId, abi.encode("unauthorized"));
         
         // Try to reject from wrong account (should revert)
         vm.prank(address(0x999));
-        vm.expectRevert("Promise: only creator can reject");
+        vm.expectRevert("Promise: only resolver can reject");
         promiseA.reject(promiseId, abi.encode("unauthorized"));
         
-        // Verify original creator can still resolve
+        // Verify original resolver can still resolve
         promiseA.resolve(promiseId, abi.encode("authorized"));
         assertEq(uint8(promiseA.status(promiseId)), uint8(Promise.PromiseStatus.Resolved));
     }
@@ -251,7 +251,7 @@ contract XChainPromiseTest is Test, Relayer {
         
         // getPromise should return empty data for non-existent promise
         Promise.PromiseData memory emptyPromise = promiseA.getPromise(fakePromiseId);
-        assertEq(emptyPromise.creator, address(0));
+        assertEq(emptyPromise.resolver, address(0));
         assertEq(uint8(emptyPromise.status), uint8(Promise.PromiseStatus.Pending));
         assertEq(emptyPromise.returnData.length, 0);
     }

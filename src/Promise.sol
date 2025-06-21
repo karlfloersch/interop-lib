@@ -15,7 +15,7 @@ contract Promise {
 
     /// @notice Promise data structure
     struct PromiseData {
-        address creator;
+        address resolver;
         PromiseStatus status;
         bytes returnData;
     }
@@ -33,7 +33,7 @@ contract Promise {
     uint256 public immutable currentChainId;
 
     /// @notice Event emitted when a new promise is created
-    event PromiseCreated(uint256 indexed promiseId, address indexed creator);
+    event PromiseCreated(uint256 indexed promiseId, address indexed resolver);
 
     /// @notice Event emitted when a promise is resolved
     event PromiseResolved(uint256 indexed promiseId, bytes returnData);
@@ -78,7 +78,7 @@ contract Promise {
         promiseId = generateGlobalPromiseId(currentChainId, localPromiseId);
         
         promises[promiseId] = PromiseData({
-            creator: msg.sender,
+            resolver: msg.sender,
             status: PromiseStatus.Pending,
             returnData: ""
         });
@@ -92,7 +92,7 @@ contract Promise {
     function resolve(uint256 promiseId, bytes memory returnData) external {
         PromiseData storage promiseData = promises[promiseId];
         require(promiseData.status == PromiseStatus.Pending, "Promise: promise already settled");
-        require(msg.sender == promiseData.creator, "Promise: only creator can resolve");
+        require(msg.sender == promiseData.resolver, "Promise: only resolver can resolve");
 
         promiseData.status = PromiseStatus.Resolved;
         promiseData.returnData = returnData;
@@ -106,7 +106,7 @@ contract Promise {
     function reject(uint256 promiseId, bytes memory errorData) external {
         PromiseData storage promiseData = promises[promiseId];
         require(promiseData.status == PromiseStatus.Pending, "Promise: promise already settled");
-        require(msg.sender == promiseData.creator, "Promise: only creator can reject");
+        require(msg.sender == promiseData.resolver, "Promise: only resolver can reject");
 
         promiseData.status = PromiseStatus.Rejected;
         promiseData.returnData = errorData;
@@ -132,7 +132,7 @@ contract Promise {
     /// @param promiseId The ID of the promise to check
     /// @return exists Whether the promise exists
     function exists(uint256 promiseId) external view returns (bool exists) {
-        return promises[promiseId].creator != address(0);
+        return promises[promiseId].resolver != address(0);
     }
 
     /// @notice Get the current promise counter (useful for testing)
@@ -157,7 +157,7 @@ contract Promise {
             promiseId, 
             uint8(promiseData.status), 
             promiseData.returnData,
-            promiseData.creator
+            promiseData.resolver
         );
         
         // Send cross-chain message
@@ -176,7 +176,7 @@ contract Promise {
         
         PromiseData storage promiseData = promises[promiseId];
         require(promiseData.status == PromiseStatus.Pending, "Promise: promise already settled");
-        require(msg.sender == promiseData.creator, "Promise: only creator can transfer");
+        require(msg.sender == promiseData.resolver, "Promise: only resolver can transfer");
         
         // Encode the call to receiveResolverTransfer
         bytes memory message = abi.encodeWithSignature(
@@ -198,12 +198,12 @@ contract Promise {
     /// @param promiseId The global promise ID
     /// @param promiseStatus The status of the shared promise
     /// @param returnData The return data of the shared promise
-    /// @param creator The creator address of the shared promise
+    /// @param resolver The resolver address of the shared promise
     function receiveSharedPromise(
         uint256 promiseId, 
         uint8 promiseStatus, 
         bytes memory returnData,
-        address creator
+        address resolver
     ) external {
         // Verify the message comes from another Promise contract via cross-domain messenger
         require(msg.sender == address(messenger), "Promise: only messenger can call");
@@ -211,7 +211,7 @@ contract Promise {
         
         // Store the shared promise data
         promises[promiseId] = PromiseData({
-            creator: creator,
+            resolver: resolver,
             status: PromiseStatus(promiseStatus),
             returnData: returnData
         });
@@ -234,7 +234,7 @@ contract Promise {
         
         // Create or update the promise with the new resolver
         promises[promiseId] = PromiseData({
-            creator: newResolver,
+            resolver: newResolver,
             status: PromiseStatus.Pending,
             returnData: ""
         });

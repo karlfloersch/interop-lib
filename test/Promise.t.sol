@@ -10,7 +10,7 @@ contract PromiseTest is Test {
     address public alice = address(0x1);
     address public bob = address(0x2);
 
-    event PromiseCreated(uint256 indexed promiseId, address indexed creator);
+    event PromiseCreated(uint256 indexed promiseId, address indexed resolver);
     event PromiseResolved(uint256 indexed promiseId, bytes returnData);
     event PromiseRejected(uint256 indexed promiseId, bytes errorData);
 
@@ -30,7 +30,7 @@ contract PromiseTest is Test {
         assertEq(promiseId, expectedId, "First promise should have correct global ID");
         
         Promise.PromiseData memory data = promiseContract.getPromise(promiseId);
-        assertEq(data.creator, alice, "Creator should be alice");
+        assertEq(data.resolver, alice, "Resolver should be alice");
         assertEq(uint256(data.status), uint256(Promise.PromiseStatus.Pending), "Status should be Pending");
         assertEq(data.returnData, "", "Return data should be empty");
         
@@ -54,8 +54,8 @@ contract PromiseTest is Test {
         Promise.PromiseData memory data1 = promiseContract.getPromise(promiseId1);
         Promise.PromiseData memory data2 = promiseContract.getPromise(promiseId2);
         
-        assertEq(data1.creator, alice, "First promise creator should be alice");
-        assertEq(data2.creator, bob, "Second promise creator should be bob");
+        assertEq(data1.resolver, alice, "First promise resolver should be alice");
+        assertEq(data2.resolver, bob, "Second promise resolver should be bob");
     }
 
     function test_resolvePromise() public {
@@ -94,39 +94,39 @@ contract PromiseTest is Test {
         assertEq(uint256(promiseContract.status(promiseId)), uint256(Promise.PromiseStatus.Rejected), "Status should be Rejected");
     }
 
-    function test_onlyCreatorCanResolve() public {
+    function test_onlyResolverCanResolve() public {
         vm.prank(alice);
         uint256 promiseId = promiseContract.create();
         
         bytes memory returnData = abi.encode(uint256(42));
         
         vm.prank(bob);
-        vm.expectRevert("Promise: only creator can resolve");
+        vm.expectRevert("Promise: only resolver can resolve");
         promiseContract.resolve(promiseId, returnData);
     }
 
-    function test_onlyCreatorCanReject() public {
+    function test_onlyResolverCanReject() public {
         vm.prank(alice);
         uint256 promiseId = promiseContract.create();
         
         bytes memory errorData = abi.encode("Error");
         
         vm.prank(bob);
-        vm.expectRevert("Promise: only creator can reject");
+        vm.expectRevert("Promise: only resolver can reject");
         promiseContract.reject(promiseId, errorData);
     }
 
     function test_cannotResolveNonExistentPromise() public {
         bytes memory returnData = abi.encode(uint256(42));
         
-        vm.expectRevert("Promise: only creator can resolve");
+        vm.expectRevert("Promise: only resolver can resolve");
         promiseContract.resolve(999, returnData);
     }
 
     function test_cannotRejectNonExistentPromise() public {
         bytes memory errorData = abi.encode("Error");
         
-        vm.expectRevert("Promise: only creator can reject");
+        vm.expectRevert("Promise: only resolver can reject");
         promiseContract.reject(999, errorData);
     }
 
@@ -198,7 +198,7 @@ contract PromiseTest is Test {
     function test_getPromiseOfNonExistentPromise() public {
         // Non-existent promises return empty data (cross-chain compatible behavior)
         Promise.PromiseData memory data = promiseContract.getPromise(999);
-        assertEq(data.creator, address(0));
+        assertEq(data.resolver, address(0));
         assertEq(uint256(data.status), uint256(Promise.PromiseStatus.Pending));
         assertEq(data.returnData.length, 0);
     }
