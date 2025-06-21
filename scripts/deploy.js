@@ -76,8 +76,8 @@ function loadConfig() {
   }
 }
 
-async function deployContract(superConfig, wallet, contractName, constructorArgs = [], salt = null) {
-  console.log(`\n📦 Deploying ${contractName}...`)
+function createSuperContract(superConfig, wallet, contractName, constructorArgs = [], salt = null) {
+  console.log(`📦 Creating SuperContract for ${contractName}...`)
   
   const { abi, bytecode } = loadArtifact(contractName)
   
@@ -90,20 +90,43 @@ async function deployContract(superConfig, wallet, contractName, constructorArgs
       constructorArgs,
       salt
     )
-
-    // Deploy to first chain
-    const chainIds = superConfig.getChainIds()
-    const chainId = chainIds[0]
-    console.log(`   → Deploying to chain ${chainId}`)
     
-    const deployment = await contract.deployManual(chainId)
-    console.log(`   ✅ ${contractName} deployed at: ${deployment.contractAddress || contract.address}`)
-    
-    return { contract, address: deployment.contractAddress || contract.address }
+    console.log(`   ✅ ${contractName} SuperContract created at: ${contract.address}`)
+    return contract
   } catch (error) {
-    console.error(`   ❌ Error deploying ${contractName}:`, error.message)
+    console.error(`   ❌ Error creating SuperContract for ${contractName}:`, error.message)
     throw error
   }
+}
+
+async function deployToChain(contract, contractName, chainId) {
+  console.log(`   → Deploying ${contractName} to chain ${chainId}`)
+  
+  try {
+    // Check if already deployed
+    const isDeployed = await contract.isDeployed(chainId)
+    if (isDeployed) {
+      console.log(`   ⚠️  ${contractName} already deployed on chain ${chainId}`)
+      return
+    }
+    
+    const deployment = await contract.deployManual(chainId)
+    console.log(`   ✅ ${contractName} deployed on chain ${chainId}`)
+    return deployment
+  } catch (error) {
+    console.error(`   ❌ Error deploying ${contractName} to chain ${chainId}:`, error.message)
+    throw error
+  }
+}
+
+async function deployContractToAllChains(contract, contractName, chainIds) {
+  console.log(`\n🚀 Deploying ${contractName} to all chains...`)
+  
+  for (const chainId of chainIds) {
+    await deployToChain(contract, contractName, chainId)
+  }
+  
+  console.log(`   🎉 ${contractName} deployment complete on all chains`)
 }
 
 async function main() {
@@ -121,60 +144,71 @@ async function main() {
   
   // Create wallet
   const wallet = new SuperWallet(privateKey)
-  console.log(`   Wallet: ${wallet.account.address}`)
+  console.log(`   Wallet: ${wallet.account.address}\n`)
 
   try {
-    // Deploy contracts in dependency order
+    // Create SuperContracts for all contracts
+    console.log(`📋 Creating SuperContracts...`)
     
-    // 1. Deploy Promise contract
     const crossDomainMessenger = process.env.CROSS_DOMAIN_MESSENGER || '0x4200000000000000000000000000000000000023'
-    const promise = await deployContract(
+    
+    // 1. Create Promise SuperContract
+    const promiseContract = createSuperContract(
       config, 
       wallet, 
       'Promise', 
       [crossDomainMessenger]
     )
 
-    // 2. Deploy Callback contract
-    const callback = await deployContract(
+    // 2. Create Callback SuperContract (depends on Promise address)
+    const callbackContract = createSuperContract(
       config, 
       wallet, 
       'Callback', 
-      [promise.address, crossDomainMessenger]
+      [promiseContract.address, crossDomainMessenger]
     )
 
-    // 3. Deploy SetTimeout contract
-    const setTimeout = await deployContract(
+    // 3. Create SetTimeout SuperContract (depends on Promise address)
+    const setTimeoutContract = createSuperContract(
       config, 
       wallet, 
       'SetTimeout', 
-      [promise.address]
+      [promiseContract.address]
     )
 
-    // 4. Deploy PromiseAll contract
-    const promiseAll = await deployContract(
+    // 4. Create PromiseAll SuperContract (depends on Promise address)
+    const promiseAllContract = createSuperContract(
       config, 
       wallet, 
       'PromiseAll', 
-      [promise.address]
+      [promiseContract.address]
     )
 
+    console.log(`\n🌍 Deploying all contracts to all chains...`)
+
+    // Deploy each contract to all chains
+    await deployContractToAllChains(promiseContract, 'Promise', chainIds)
+    await deployContractToAllChains(callbackContract, 'Callback', chainIds)
+    await deployContractToAllChains(setTimeoutContract, 'SetTimeout', chainIds)
+    await deployContractToAllChains(promiseAllContract, 'PromiseAll', chainIds)
+
     console.log(`\n🎉 Deployment complete!`)
-    console.log(`\n📋 Contract Addresses:`)
-    console.log(`   Promise:    ${promise.address}`)
-    console.log(`   Callback:   ${callback.address}`)
-    console.log(`   SetTimeout: ${setTimeout.address}`)
-    console.log(`   PromiseAll: ${promiseAll.address}`)
+    console.log(`\n📋 Contract Addresses (same on all chains):`)
+    console.log(`   Promise:    ${promiseContract.address}`)
+    console.log(`   Callback:   ${callbackContract.address}`)
+    console.log(`   SetTimeout: ${setTimeoutContract.address}`)
+    console.log(`   PromiseAll: ${promiseAllContract.address}`)
     
     // Save addresses to file for future reference
     const addresses = {
-      Promise: promise.address,
-      Callback: callback.address,
-      SetTimeout: setTimeout.address,
-      PromiseAll: promiseAll.address,
+      Promise: promiseContract.address,
+      Callback: callbackContract.address,
+      SetTimeout: setTimeoutContract.address,
+      PromiseAll: promiseAllContract.address,
       deployedAt: new Date().toISOString(),
       chainIds,
-      crossDomainMessenger
+      crossDomainMessenger,
+      note: "All contracts deployed to all specified chains with same addresses (CREATE2)"
     }
     
     const addressFile = join(__dirname, 'deployed-addresses.json')
