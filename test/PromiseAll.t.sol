@@ -205,10 +205,10 @@ contract PromiseAllTest is Test {
     function test_integrationWithSetTimeout() public {
         // Create some timeout promises
         vm.prank(alice);
-        bytes32 timeout1 = setTimeoutContract.create(block.timestamp + 100);
+        bytes32 timeout1 = setTimeoutContract.create(100);
         
         vm.prank(alice);
-        bytes32 timeout2 = setTimeoutContract.create(block.timestamp + 200);
+        bytes32 timeout2 = setTimeoutContract.create(200);
         
         bytes32[] memory inputPromises = new bytes32[](2);
         inputPromises[0] = timeout1;
@@ -256,7 +256,7 @@ contract PromiseAllTest is Test {
         
         // Create a timeout promise
         vm.prank(alice);
-        bytes32 timeoutPromise = setTimeoutContract.create(block.timestamp + 100);
+        bytes32 timeoutPromise = setTimeoutContract.create(100);
         
         bytes32[] memory inputPromises = new bytes32[](2);
         inputPromises[0] = manualPromise;

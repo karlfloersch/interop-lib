@@ -24,19 +24,22 @@ contract SetTimeout is IResolvable {
         promiseContract = Promise(_promiseContract);
     }
 
-    /// @notice Create a new timeout promise that resolves after the specified timestamp
-    /// @param timestamp The timestamp after which the promise can be resolved
+    /// @notice Create a new timeout promise that resolves after the specified delay
+    /// @param secondsInFuture The number of seconds in the future when the promise can be resolved (0 = immediate)
     /// @return promiseId The ID of the created promise
-    function create(uint256 timestamp) external returns (bytes32 promiseId) {
-        require(timestamp > block.timestamp, "SetTimeout: timestamp must be in the future");
+    function create(uint256 secondsInFuture) external returns (bytes32 promiseId) {
+        // Allow 0 seconds for immediate resolution
+        
+        // Calculate the absolute timestamp
+        uint256 targetTimestamp = block.timestamp + secondsInFuture;
         
         // Create a promise via the Promise contract
         promiseId = promiseContract.create();
         
         // Store the timeout mapping
-        timeouts[promiseId] = timestamp;
+        timeouts[promiseId] = targetTimestamp;
         
-        emit TimeoutCreated(promiseId, timestamp);
+        emit TimeoutCreated(promiseId, targetTimestamp);
     }
 
     /// @notice Resolve a timeout promise if the timestamp has passed

@@ -36,10 +36,10 @@ contract PromiseHarnessTest is Test {
     function test_resolveTimeouts() public {
         // Create some timeout promises
         vm.prank(alice);
-        bytes32 timeout1 = setTimeoutContract.create(block.timestamp + 100);
+        bytes32 timeout1 = setTimeoutContract.create(100);
         
         vm.prank(bob);
-        bytes32 timeout2 = setTimeoutContract.create(block.timestamp + 200);
+        bytes32 timeout2 = setTimeoutContract.create(200);
         
         // Check pending count
         uint256 pendingPromises = harness.countPendingAuto();
@@ -114,7 +114,7 @@ contract PromiseHarnessTest is Test {
         
         // Create a timeout
         vm.prank(alice);
-        setTimeoutContract.create(block.timestamp + 100);
+        setTimeoutContract.create(100);
         
         // Create a manual promise and callback
         vm.prank(alice);
@@ -173,7 +173,7 @@ contract PromiseHarnessTest is Test {
         // Create promises 1-5
         for (uint256 i = 0; i < 5; i++) {
             vm.prank(alice);
-            setTimeoutContract.create(block.timestamp + 100);
+            setTimeoutContract.create(100);
         }
         
         // Fast forward time
@@ -195,7 +195,7 @@ contract PromiseHarnessTest is Test {
     function test_handleResolveErrors() public {
         // Create a timeout
         vm.prank(alice);
-        bytes32 timeoutPromise = setTimeoutContract.create(block.timestamp + 100);
+        bytes32 timeoutPromise = setTimeoutContract.create(100);
         
         // Fast forward time
         vm.warp(block.timestamp + 150);
@@ -219,7 +219,7 @@ contract PromiseHarnessTest is Test {
     function test_layeredResolution() public {
         // Create a timeout
         vm.prank(alice);
-        bytes32 timeoutPromise = setTimeoutContract.create(block.timestamp + 100);
+        bytes32 timeoutPromise = setTimeoutContract.create(100);
         
         // Create callback on the timeout
         TestTarget target = new TestTarget();
@@ -253,7 +253,7 @@ contract PromiseHarnessTest is Test {
     function test_resolveAllLayers() public {
         // Create a timeout
         vm.prank(alice);
-        bytes32 timeoutPromise = setTimeoutContract.create(block.timestamp + 100);
+        bytes32 timeoutPromise = setTimeoutContract.create(100);
         
         // Create callback on the timeout
         TestTarget target = new TestTarget();

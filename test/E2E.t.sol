@@ -42,7 +42,7 @@ contract E2ETest is Test {
         
         // 1. Create a SetTimeout promise that resolves in 100 seconds
         vm.prank(alice);
-        bytes32 timeoutPromise = setTimeoutContract.create(block.timestamp + 100);
+        bytes32 timeoutPromise = setTimeoutContract.create(100);
         
         // 2. Register callbacks on the timeout promise
         vm.prank(bob);
@@ -97,7 +97,7 @@ contract E2ETest is Test {
         
         // 1. Create initial timeout
         vm.prank(alice);
-        bytes32 timeoutPromise = setTimeoutContract.create(block.timestamp + 100);
+        bytes32 timeoutPromise = setTimeoutContract.create(100);
         
         // 2. Chain target will create a new promise when called
         vm.prank(bob);
@@ -137,13 +137,13 @@ contract E2ETest is Test {
         
         // Create timeouts with staggered delays
         vm.prank(alice);
-        bytes32 timeout1 = setTimeoutContract.create(block.timestamp + 50);  // Resolves first
+        bytes32 timeout1 = setTimeoutContract.create(50);  // Resolves first
         
         vm.prank(alice);
-        bytes32 timeout2 = setTimeoutContract.create(block.timestamp + 100); // Resolves second
+        bytes32 timeout2 = setTimeoutContract.create(100); // Resolves second
         
         vm.prank(alice);
-        bytes32 timeout3 = setTimeoutContract.create(block.timestamp + 150); // Resolves third
+        bytes32 timeout3 = setTimeoutContract.create(150); // Resolves third
         
         // Register callbacks
         vm.prank(bob);
@@ -198,7 +198,7 @@ contract E2ETest is Test {
         
         // Create timeout
         vm.prank(alice);
-        bytes32 timeoutPromise = setTimeoutContract.create(block.timestamp + 100);
+        bytes32 timeoutPromise = setTimeoutContract.create(100);
         
         // Register callbacks - one that fails, one that succeeds
         vm.prank(bob);
@@ -243,10 +243,10 @@ contract E2ETest is Test {
         
         // 1. Create multiple timeouts
         vm.prank(alice);
-        bytes32 shortTimeout = setTimeoutContract.create(block.timestamp + 50);
+        bytes32 shortTimeout = setTimeoutContract.create(50);
         
         vm.prank(alice);
-        bytes32 longTimeout = setTimeoutContract.create(block.timestamp + 200);
+        bytes32 longTimeout = setTimeoutContract.create(200);
         
         // 2. Register callbacks on short timeout
         vm.prank(bob);

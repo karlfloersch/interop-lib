@@ -66,7 +66,7 @@ promiseContract.transferResolve(promiseId, destinationChainId, newResolverAddres
 
 ```solidity
 // Create a promise that resolves after 100 seconds
-uint256 timeoutId = setTimeoutContract.create(block.timestamp + 100);
+uint256 timeoutId = setTimeoutContract.create(100);
 
 // Later, anyone can resolve it once the time has passed
 if (setTimeoutContract.canResolve(timeoutId)) {
@@ -200,7 +200,7 @@ function executeCycle(uint256 cycleId) external {
     );
     
             // **CRON MAGIC**: Schedule next execution automatically
-        uint256 nextTimeoutId = setTimeoutContract.create(block.timestamp + cycle.interval);
+        uint256 nextTimeoutId = setTimeoutContract.create(cycle.interval);
         
         // **AUTOMATIC TRIGGERING**: Create callback to automatically execute next cycle
         uint256 nextExecutionCallbackId = callbackContract.then(

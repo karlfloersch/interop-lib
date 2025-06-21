@@ -22,17 +22,18 @@ contract SetTimeoutTest is Test {
     }
 
     function test_createTimeout() public {
-        uint256 futureTimestamp = block.timestamp + 100;
+        uint256 delay = 100;
+        uint256 expectedTimestamp = block.timestamp + delay;
         bytes32 expectedPromiseId = promiseContract.generatePromiseId(bytes32(uint256(1)));
         
         vm.prank(alice);
         vm.expectEmit(true, false, false, true);
-        emit TimeoutCreated(expectedPromiseId, futureTimestamp);
+        emit TimeoutCreated(expectedPromiseId, expectedTimestamp);
         
-        bytes32 promiseId = setTimeout.create(futureTimestamp);
+        bytes32 promiseId = setTimeout.create(delay);
         
         assertEq(promiseId, expectedPromiseId, "Promise ID should match expected global ID");
-        assertEq(setTimeout.getTimeout(promiseId), futureTimestamp, "Timeout should match");
+        assertEq(setTimeout.getTimeout(promiseId), expectedTimestamp, "Timeout should match");
         assertEq(setTimeout.getRemainingTime(promiseId), 100, "Remaining time should be 100 seconds");
         assertFalse(setTimeout.canResolve(promiseId), "Should not be resolvable yet");
         
@@ -41,38 +42,45 @@ contract SetTimeoutTest is Test {
         assertEq(uint256(promiseContract.status(promiseId)), uint256(Promise.PromiseStatus.Pending), "Promise should be pending");
     }
 
-    function test_cannotCreateTimeoutInPast() public {
-        // Set current time to 1000 to avoid underflow
-        vm.warp(1000);
-        uint256 pastTimestamp = block.timestamp - 100;
+    function test_canCreateZeroDelayTimeout() public {
+        uint256 delay = 0;
+        uint256 expectedTimestamp = block.timestamp;
         
         vm.prank(alice);
-        vm.expectRevert("SetTimeout: timestamp must be in the future");
-        setTimeout.create(pastTimestamp);
+        bytes32 promiseId = setTimeout.create(delay);
+        
+        assertEq(setTimeout.getTimeout(promiseId), expectedTimestamp, "Timeout should be current timestamp");
+        assertEq(setTimeout.getRemainingTime(promiseId), 0, "Remaining time should be 0");
+        assertTrue(setTimeout.canResolve(promiseId), "Should be resolvable immediately");
     }
 
-    function test_cannotCreateTimeoutAtCurrentTime() public {
-        uint256 currentTimestamp = block.timestamp;
+    function test_canCreateImmediateTimeout() public {
+        uint256 delay = 0;
         
         vm.prank(alice);
-        vm.expectRevert("SetTimeout: timestamp must be in the future");
-        setTimeout.create(currentTimestamp);
+        bytes32 promiseId = setTimeout.create(delay);
+        
+        assertTrue(setTimeout.canResolve(promiseId), "Should be resolvable immediately with 0 delay");
+        setTimeout.resolve(promiseId);
+        
+        assertEq(uint256(promiseContract.status(promiseId)), uint256(Promise.PromiseStatus.Resolved), "Promise should be resolved");
     }
 
     function test_resolveTimeout() public {
-        uint256 futureTimestamp = block.timestamp + 100;
+        uint256 delay = 100;
+        uint256 targetTimestamp = block.timestamp + delay;
         
         vm.prank(alice);
-        bytes32 promiseId = setTimeout.create(futureTimestamp);
+        bytes32 promiseId = setTimeout.create(delay);
         
         // Fast forward time
-        vm.warp(futureTimestamp);
+        vm.warp(targetTimestamp);
         
         assertTrue(setTimeout.canResolve(promiseId), "Should be resolvable now");
         assertEq(setTimeout.getRemainingTime(promiseId), 0, "Remaining time should be 0");
         
         vm.expectEmit(true, false, false, true);
-        emit TimeoutResolved(promiseId, futureTimestamp);
+        emit TimeoutResolved(promiseId, targetTimestamp);
         
         setTimeout.resolve(promiseId);
         
@@ -85,10 +93,10 @@ contract SetTimeoutTest is Test {
     }
 
     function test_cannotResolveBeforeTimeout() public {
-        uint256 futureTimestamp = block.timestamp + 100;
+        uint256 delay = 100;
         
         vm.prank(alice);
-        bytes32 promiseId = setTimeout.create(futureTimestamp);
+        bytes32 promiseId = setTimeout.create(delay);
         
         // Try to resolve before timeout
         vm.expectRevert("SetTimeout: timeout not reached");
@@ -101,13 +109,14 @@ contract SetTimeoutTest is Test {
     }
 
     function test_cannotResolveAlreadyResolvedTimeout() public {
-        uint256 futureTimestamp = block.timestamp + 100;
+        uint256 delay = 100;
+        uint256 targetTimestamp = block.timestamp + delay;
         
         vm.prank(alice);
-        bytes32 promiseId = setTimeout.create(futureTimestamp);
+        bytes32 promiseId = setTimeout.create(delay);
         
         // Fast forward and resolve
-        vm.warp(futureTimestamp);
+        vm.warp(targetTimestamp);
         setTimeout.resolve(promiseId);
         
         // Try to resolve again
@@ -116,16 +125,18 @@ contract SetTimeoutTest is Test {
     }
 
     function test_multipleTimeouts() public {
-        uint256 timestamp1 = block.timestamp + 50;
-        uint256 timestamp2 = block.timestamp + 100;
+        uint256 delay1 = 50;
+        uint256 delay2 = 100;
+        uint256 timestamp1 = block.timestamp + delay1;
+        uint256 timestamp2 = block.timestamp + delay2;
         bytes32 expectedPromiseId1 = promiseContract.generatePromiseId(bytes32(uint256(1)));
         bytes32 expectedPromiseId2 = promiseContract.generatePromiseId(bytes32(uint256(2)));
         
         vm.prank(alice);
-        bytes32 promiseId1 = setTimeout.create(timestamp1);
+        bytes32 promiseId1 = setTimeout.create(delay1);
         
         vm.prank(bob);
-        bytes32 promiseId2 = setTimeout.create(timestamp2);
+        bytes32 promiseId2 = setTimeout.create(delay2);
         
         assertEq(promiseId1, expectedPromiseId1, "First promise ID should match expected global ID");
         assertEq(promiseId2, expectedPromiseId2, "Second promise ID should match expected global ID");
@@ -155,23 +166,24 @@ contract SetTimeoutTest is Test {
     }
 
     function test_getRemainingTimeAccuracy() public {
-        uint256 futureTimestamp = block.timestamp + 1000;
+        uint256 delay = 1000;
+        uint256 targetTimestamp = block.timestamp + delay;
         
         vm.prank(alice);
-        bytes32 promiseId = setTimeout.create(futureTimestamp);
+        bytes32 promiseId = setTimeout.create(delay);
         
         assertEq(setTimeout.getRemainingTime(promiseId), 1000, "Initial remaining time should be 1000");
         
-        // Fast forward 300 seconds
+        // Fast forward 300 seconds  
         vm.warp(block.timestamp + 300);
         assertEq(setTimeout.getRemainingTime(promiseId), 700, "Remaining time should be 700");
         
         // Fast forward to exactly the timeout
-        vm.warp(futureTimestamp);
+        vm.warp(targetTimestamp);
         assertEq(setTimeout.getRemainingTime(promiseId), 0, "Remaining time should be 0 at timeout");
         
         // Fast forward past the timeout
-        vm.warp(futureTimestamp + 100);
+        vm.warp(targetTimestamp + 100);
         assertEq(setTimeout.getRemainingTime(promiseId), 0, "Remaining time should be 0 past timeout");
     }
 
@@ -188,10 +200,11 @@ contract SetTimeoutTest is Test {
     }
 
     function test_promiseContractIntegration() public {
-        uint256 futureTimestamp = block.timestamp + 100;
+        uint256 delay = 100;
+        uint256 targetTimestamp = block.timestamp + delay;
         
         vm.prank(alice);
-        bytes32 promiseId = setTimeout.create(futureTimestamp);
+        bytes32 promiseId = setTimeout.create(delay);
         
         // Verify the promise was created with correct resolver
         Promise.PromiseData memory data = promiseContract.getPromise(promiseId);
@@ -200,7 +213,7 @@ contract SetTimeoutTest is Test {
         assertEq(data.returnData, "", "Promise should have empty return data initially");
         
         // Fast forward and resolve
-        vm.warp(futureTimestamp);
+        vm.warp(targetTimestamp);
         setTimeout.resolve(promiseId);
         
         // Check final state
@@ -210,12 +223,13 @@ contract SetTimeoutTest is Test {
     }
 
     function test_anyoneCanResolveTimeout() public {
-        uint256 futureTimestamp = block.timestamp + 100;
+        uint256 delay = 100;
+        uint256 targetTimestamp = block.timestamp + delay;
         
         vm.prank(alice);
-        bytes32 promiseId = setTimeout.create(futureTimestamp);
+        bytes32 promiseId = setTimeout.create(delay);
         
-        vm.warp(futureTimestamp);
+        vm.warp(targetTimestamp);
         
         // Bob can resolve Alice's timeout
         vm.prank(bob);
@@ -225,20 +239,25 @@ contract SetTimeoutTest is Test {
     }
 
     function testFuzz_createAndResolveTimeout(uint256 delay) public {
-        // Bound delay to reasonable range (1 second to 1 year)
-        delay = bound(delay, 1, 365 days);
+        // Bound delay to reasonable range (0 second to 1 year)
+        delay = bound(delay, 0, 365 days);
         
-        uint256 futureTimestamp = block.timestamp + delay;
+        uint256 targetTimestamp = block.timestamp + delay;
         
         vm.prank(alice);
-        bytes32 promiseId = setTimeout.create(futureTimestamp);
+        bytes32 promiseId = setTimeout.create(delay);
         
-        assertEq(setTimeout.getTimeout(promiseId), futureTimestamp, "Timeout should match");
+        assertEq(setTimeout.getTimeout(promiseId), targetTimestamp, "Timeout should match");
         assertEq(setTimeout.getRemainingTime(promiseId), delay, "Remaining time should match delay");
-        assertFalse(setTimeout.canResolve(promiseId), "Should not be resolvable yet");
+        
+        if (delay == 0) {
+            assertTrue(setTimeout.canResolve(promiseId), "Should be resolvable immediately for 0 delay");
+        } else {
+            assertFalse(setTimeout.canResolve(promiseId), "Should not be resolvable yet for non-zero delay");
+        }
         
         // Fast forward to timeout
-        vm.warp(futureTimestamp);
+        vm.warp(targetTimestamp);
         
         assertTrue(setTimeout.canResolve(promiseId), "Should be resolvable now");
         assertEq(setTimeout.getRemainingTime(promiseId), 0, "Remaining time should be 0");

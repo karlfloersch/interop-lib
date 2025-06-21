@@ -60,7 +60,7 @@ contract XChainSetTimeoutTest is Test, Relayer {
         vm.selectFork(forkIds[0]);
         
         // Create timeout promise on Chain A
-        bytes32 timeoutPromise = setTimeoutA.create(block.timestamp + 100);
+        bytes32 timeoutPromise = setTimeoutA.create(100);
         
         // Create target contract on Chain B
         vm.selectFork(forkIds[1]);
@@ -114,7 +114,7 @@ contract XChainSetTimeoutTest is Test, Relayer {
         vm.selectFork(forkIds[0]);
         
         // Create timeout promise on Chain A
-        bytes32 timeoutPromise = setTimeoutA.create(block.timestamp + 100);
+        bytes32 timeoutPromise = setTimeoutA.create(100);
         uint256 chainBId = chainIdByForkId[forkIds[1]];
         
         // Note: SetTimeout doesn't have cross-chain functionality for sharing timeout mappings,
@@ -148,9 +148,9 @@ contract XChainSetTimeoutTest is Test, Relayer {
         vm.selectFork(forkIds[0]);
         
         // Create multiple timeout promises on Chain A with different delays
-        bytes32 timeout1 = setTimeoutA.create(block.timestamp + 50);
-        bytes32 timeout2 = setTimeoutA.create(block.timestamp + 100);
-        bytes32 timeout3 = setTimeoutA.create(block.timestamp + 150);
+        bytes32 timeout1 = setTimeoutA.create(50);
+        bytes32 timeout2 = setTimeoutA.create(100);
+        bytes32 timeout3 = setTimeoutA.create(150);
         
         // Create target contracts on Chain B
         vm.selectFork(forkIds[1]);
@@ -214,7 +214,7 @@ contract XChainSetTimeoutTest is Test, Relayer {
         vm.selectFork(forkIds[0]);
         
         // Create timeout on Chain A
-        bytes32 timeoutPromise = setTimeoutA.create(block.timestamp + 100);
+        bytes32 timeoutPromise = setTimeoutA.create(100);
         
         // Verify the promise ID is a global hash-based ID
         bytes32 expectedGlobalId = promiseA.generateGlobalPromiseId(chainIdByForkId[forkIds[0]], bytes32(uint256(1)));
