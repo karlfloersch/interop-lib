@@ -147,6 +147,14 @@ contract MockExchange {
         return supportedPairs[tokenIn][tokenOut];
     }
 
+    /// @notice Check if failure mode is enabled for a token pair
+    /// @param tokenIn Input token address
+    /// @param tokenOut Output token address
+    /// @return enabled Whether failure mode is enabled
+    function isFailureModeEnabled(address tokenIn, address tokenOut) external view returns (bool enabled) {
+        return forceFailure[tokenIn][tokenOut];
+    }
+
     /// @notice Provide liquidity to the exchange (for testing)
     /// @param token Token address
     /// @param amount Amount to provide

@@ -131,23 +131,17 @@ uint256 finalSwapCallbackId = callbackA.thenOn(
     this.executeFinalSwapWithBranching.selector // Smart callback with branching
 );
 
-// CATCH: Register rollback callback for automatic failure recovery
-console.log("SETUP: Chaining rollback bridge for failure handling");
-uint256 rollbackCallbackId = callbackA.onRejectOn(
-    chainIdByForkId[forkIds[1]], // Execute rollback on Chain B
-    bridgePromiseId,            // If bridge operation fails
-    address(this),              // Call back to this contract  
-    this.executeAutomaticRollback.selector // Automatic rollback handler
-);
-
-// ADVANCED CATCH: Register nested rollback for final swap failures
-console.log("SETUP: Chaining nested rollback for final swap failures");
-uint256 nestedRollbackId = callbackA.onRejectOn(
+// CATCH: Register rollback for final swap failures (bridge tokens back)
+console.log("SETUP: Chaining bridge-back for final swap failures");
+uint256 bridgeBackCallbackId = callbackA.onRejectOn(
     chainIdByForkId[forkIds[1]], // Execute on Chain B
     finalSwapCallbackId,        // If final swap fails
     address(this),              // Call back to this contract
     this.bridgeTokensBack.selector // Bridge tokens back to Chain A
 );
+
+// Note: Additional recovery layers could be added here if needed
+// For this example, the bridge-back is the primary rollback mechanism
 
 vm.stopPrank();
 console.log("PROMISE CHAIN SETUP COMPLETE WITH ROLLBACK HANDLING!");
@@ -157,14 +151,15 @@ What Happens in Setup:
 - Step 1: Perform initial swap (Token1 → Token2) 
 - Step 2: Execute bridge operation, get back promise ID
 - Step 3: Chain final swap callback to bridge promise completion
-- Step 4: Register rollback callback using `onRejectOn()` for bridge failures
-- Step 5: Register nested rollback callback for final swap failures
-- Result: Complete workflow defined with automatic failure recovery before any cross-chain execution
+- Step 4: Register bridge-back callback using `onRejectOn()` for final swap failures
+- Result: Complete workflow with automatic rollback defined before any cross-chain execution
 
 Rollback Chain Architecture:
 ```
-Success Path:  Token1 → Token2 → Bridge → Token2 (Chain B) → Token3
-Failure Path:  Token1 → Token2 → Bridge → Token2 (Chain B) → [FAIL] → Bridge Back → Token2 (Chain A) → Token1
+Success Path:   Token1 → Token2 → Bridge → Token2 (Chain B) → Token3
+Failure Path:   Token1 → Token2 → Bridge → Token2 (Chain B) → [SWAP FAILS]
+                                                                    ↓
+Recovery Chain: Token2 (Chain B) → Bridge Back → Token2 (Chain A)
 ```
 
 ### Phase 2: Execution (Resolve & Relay)
@@ -380,8 +375,7 @@ Example rollback chain:
 // If final swap fails → bridge tokens back to Chain A
 callbackA.onRejectOn(chainB, finalSwapPromiseId, address(this), this.bridgeTokensBack.selector);
 
-// If bridge back fails → manual intervention required  
-callbackA.onRejectOn(chainA, bridgeBackPromiseId, address(this), this.manualRecovery.selector);
+// Additional recovery layers can be added as needed for more complex scenarios
 ```
 
 ### Authorization Model

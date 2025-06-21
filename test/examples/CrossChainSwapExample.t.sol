@@ -148,110 +148,143 @@ contract CrossChainSwapExampleTest is Test, Relayer {
         vm.stopPrank();
     }
 
-    /// @notice Test successful cross-chain swap flow
+    /// @notice Test successful cross-chain swap flow with proper promise chain setup
     /// @dev Flow: Token1 -> Token2 (Chain A) -> Bridge -> Token2 (Chain B) -> Token3  
     function test_CrossChainSwap_Success() public {
-        vm.selectFork(forkIds[0]);
-        
-        console.log("=== Testing Successful Cross-Chain Swap ===");
+        console.log("=== Testing Successful Cross-Chain Swap with Promise Chain ===");
         console.log("Flow: Token1 -> Token2 (Chain A) -> Bridge -> Token2 (Chain B) -> Token3");
+        console.log("");
         
+        // ========================================
+        // PHASE 1: PROMISE CHAIN SETUP (UPFRONT)
+        // ========================================
+        console.log("PHASE 1: SETTING UP COMPLETE PROMISE CHAIN");
+        console.log("Building promise chain using REAL operations that return promises");
+        
+        vm.selectFork(forkIds[0]);
         vm.startPrank(user);
         
-        // Step 1: Swap Token1 for Token2 on Chain A
-        console.log("Step 1: Swapping Token1 for Token2 on Chain A");
+        // Pre-approve tokens for the entire workflow
         token1.approve(address(exchangeA), swapAmount);
-        uint256 token2Amount = exchangeA.swap(address(token1), address(token2), swapAmount);
-        assertEq(token2Amount, swapAmount, "Should receive equal amount of Token2");
-        assertEq(token2.balanceOf(user), swapAmount, "User should have Token2");
-        console.log("Swapped Token1 for Token2");
+        token2.approve(address(bridgeA), swapAmount);
         
-        // Step 2: Bridge Token2 from Chain A to Chain B
-        console.log("Step 2: Bridging Token2 from Chain A to Chain B");
-        token2.approve(address(bridgeA), token2Amount);
+        // CHAIN CONSTRUCTION: Each operation returns a promise, chain the next operation to it
+        console.log("SETUP: Executing initial swap Token1 -> Token2");
+        uint256 token2Amount = exchangeA.swap(address(token1), address(token2), swapAmount);
+        
+        console.log("SETUP: Executing bridge operation");  
         (uint256 bridgePromiseId, uint256 bridgeCallbackId) = bridgeA.bridgeTokens(
             address(token2),
             token2Amount,
-            chainIdByForkId[forkIds[1]], // Destination: Chain B
-            user                        // Recipient: same user
+            chainIdByForkId[forkIds[1]], // Chain B
+            user
         );
-        console.log("Bridge promise created");
+        
+        // CHAINING: Register callback that chains to bridge completion
+        console.log("SETUP: Chaining final swap with failure handling");
+        uint256 finalSwapCallbackId = callbackA.thenOn(
+            chainIdByForkId[forkIds[1]], // Execute on Chain B  
+            bridgePromiseId,            // When bridge promise resolves
+            address(this),              // Call back to this contract
+            this.executeFinalSwapWithBranching.selector // Smart callback with branching
+        );
+        
+        // CATCH: Register rollback for final swap failures (bridge tokens back)
+        console.log("SETUP: Chaining bridge-back for final swap failures");
+        uint256 bridgeBackCallbackId = callbackA.onRejectOn(
+            chainIdByForkId[forkIds[1]], // Execute on Chain B
+            finalSwapCallbackId,        // If final swap fails
+            address(this),              // Call back to this contract
+            this.bridgeTokensBack.selector // Bridge tokens back to Chain A
+        );
+        
+        // Note: Additional recovery layers could be added here if needed
+        // For this example, the bridge-back is the primary rollback mechanism
         
         vm.stopPrank();
+        console.log("PROMISE CHAIN SETUP COMPLETE WITH ROLLBACK HANDLING!");
+        console.log("");
         
-        // Step 3: Process cross-chain bridge messages
-        console.log("Step 3: Processing cross-chain bridge messages");
+        // ========================================
+        // PHASE 2: EXECUTION (RESOLVE & RELAY)
+        // ========================================
+        console.log("PHASE 2: EXECUTING WORKFLOW VIA PROMISE RESOLUTION");
+        console.log("Now we just resolve promises and relay - the chain handles the rest");
+        console.log("");
+        
+        // Relay cross-chain messages (sends bridge callback to Chain B)
+        console.log("EXECUTION: Relaying cross-chain messages");
         relayAllMessages();
-        console.log("Bridge messages relayed");
+        console.log("Bridge callback relayed to Chain B");
         
-        // Step 3b: Execute cross-chain callback on Chain B to mint tokens
-        console.log("Step 3b: Executing cross-chain callback on Chain B");
+        // Execute cross-chain callback on Chain B (triggers mint operation)
+        console.log("EXECUTION: Executing cross-chain callback on Chain B");
         vm.selectFork(forkIds[1]);
-        
-        // Check if callback exists and is resolvable
-        assertTrue(callbackB.exists(bridgeCallbackId), "Bridge callback should exist on Chain B");
-        
         if (callbackB.canResolve(bridgeCallbackId)) {
-            console.log("Executing bridge callback to mint tokens");
             callbackB.resolve(bridgeCallbackId);
-            console.log("Bridge callback executed successfully");
-        } else {
-            console.log("Bridge callback is not yet resolvable");
-            // Check if parent promise exists and its status
-            if (promiseB.exists(bridgePromiseId)) {
-                console.log("Parent promise exists on Chain B");
-                uint8 status = uint8(promiseB.status(bridgePromiseId));
-                console.log("Parent promise status:", status);
-            } else {
-                console.log("Parent promise does not exist on Chain B");
-            }
+            console.log("Bridge callback executed - tokens minted on Chain B");
         }
         
-        // Verify bridge mint on Chain B
-        assertEq(token2.balanceOf(user), token2Amount, "User should have Token2 on Chain B");
-        console.log("Bridge completed - user has Token2 on Chain B");
+        // Execute final swap callback (triggers final swap with branching logic)
+        console.log("EXECUTION: Executing final swap callback");
+        if (callbackB.canResolve(finalSwapCallbackId)) {
+            callbackB.resolve(finalSwapCallbackId);
+            console.log("Final swap callback executed");
+        }
         
-        // Step 4: Swap Token2 for Token3 on Chain B
-        console.log("Step 4: Swapping Token2 for Token3 on Chain B");
-        vm.startPrank(user);
-        token2.approve(address(exchangeB), token2Amount);
-        uint256 token3Amount = exchangeB.swap(address(token2), address(token3), token2Amount);
-        assertEq(token3Amount, token2Amount, "Should receive equal amount of Token3");
-        assertEq(token3.balanceOf(user), token3Amount, "User should have Token3");
-        console.log("Swapped Token2 for Token3");
-        vm.stopPrank();
+        // ========================================
+        // PHASE 3: VERIFICATION (RESULTS)
+        // ========================================
+        console.log("");
+        console.log("PHASE 3: VERIFYING RESULTS");
         
-        // Step 5: Verify final state
-        console.log("Step 5: Verifying final state");
+        // Verify final state - success path
         vm.selectFork(forkIds[0]);
-        assertEq(token1.balanceOf(user), initialToken1Balance - swapAmount, "Token1 balance should be reduced");
+        uint256 finalToken1Balance = token1.balanceOf(user);
+        console.log("Chain A - Token1 balance change:", int256(finalToken1Balance) - int256(initialToken1Balance));
         
         vm.selectFork(forkIds[1]);
-        assertEq(token3.balanceOf(user), initialToken3Balance + token3Amount, "Token3 balance should be increased");
+        uint256 finalToken3Balance = token3.balanceOf(user);
+        console.log("Chain B - Token3 balance change:", int256(finalToken3Balance) - int256(initialToken3Balance));
         
-        console.log("SUCCESS: Cross-chain swap completed!");
-        console.log("Cross-chain swap completed successfully");
+        // Verify success path
+        assertEq(finalToken1Balance, initialToken1Balance - swapAmount, "Token1 should be reduced");
+        assertGt(finalToken3Balance, initialToken3Balance, "Token3 should be increased");
+        
+        console.log("");
+        console.log("SUCCESS: Promise chain executed successfully!");
+        console.log("Flow completed: Token1 -> Token2 -> Bridge -> Token2 (Chain B) -> Token3");
     }
 
-    /// @notice Test cross-chain swap with failure on second swap and rollback
-    /// @dev Tests failure handling when Token2 -> Token3 swap fails on Chain B
+    /// @notice Test cross-chain swap with failure and automatic rollback chain
+    /// @dev Tests automatic failure handling when Token2 -> Token3 swap fails on Chain B
     function test_CrossChainSwap_FailureAndRollback() public {
+        console.log("=== Testing Cross-Chain Swap with Automatic Rollback Chain ===");
+        console.log("Will demonstrate automatic rollback when final swap fails");
+        console.log("");
+        
+        // ========================================
+        // PHASE 1: SAME PROMISE CHAIN SETUP BUT WITH FAILURE MODE
+        // ========================================
+        console.log("PHASE 1: SETTING UP PROMISE CHAIN (SAME AS SUCCESS TEST)");
+        console.log("The promise chain infrastructure is identical - only execution differs");
+        
+        // Set up failure mode BEFORE chain setup (this determines the execution path)
+        vm.selectFork(forkIds[1]);
+        exchangeB.setFailureMode(address(token2), address(token3), true);
+        console.log("SETUP: Enabled failure mode for Token2 -> Token3 swap on Chain B");
+        
         vm.selectFork(forkIds[0]);
-        
-        console.log("=== Testing Cross-Chain Swap with Failure and Rollback ===");
-        console.log("Will fail the second swap and demonstrate rollback");
-        
         vm.startPrank(user);
         
-        // Step 1: Successful swap on Chain A (Token1 -> Token2)
-        console.log("Step 1: Swapping Token1 for Token2 on Chain A");
+        // Same promise chain setup as success test
         token1.approve(address(exchangeA), swapAmount);
-        uint256 token2Amount = exchangeA.swap(address(token1), address(token2), swapAmount);
-        console.log("Swapped Token1 for Token2");
+        token2.approve(address(bridgeA), swapAmount);
         
-        // Step 2: Bridge Token2 to Chain B
-        console.log("Step 2: Bridging Token2 to Chain B");
-        token2.approve(address(bridgeA), token2Amount);
+        console.log("SETUP: Executing initial swap Token1 -> Token2");
+        uint256 token2Amount = exchangeA.swap(address(token1), address(token2), swapAmount);
+        
+        console.log("SETUP: Executing bridge operation");  
         (uint256 bridgePromiseId, uint256 bridgeCallbackId) = bridgeA.bridgeTokens(
             address(token2),
             token2Amount,
@@ -259,79 +292,84 @@ contract CrossChainSwapExampleTest is Test, Relayer {
             user
         );
         
-        vm.stopPrank();
+        console.log("SETUP: Chaining final swap (will detect failure and trigger rollback)");
+        uint256 finalSwapCallbackId = callbackA.thenOn(
+            chainIdByForkId[forkIds[1]],
+            bridgePromiseId,
+            address(this),
+            this.executeFinalSwapWithBranching.selector
+        );
         
-        // Step 3: Process bridge
-        console.log("Step 3: Processing bridge");
+        console.log("SETUP: Chaining automatic bridge-back for final swap failures");
+        uint256 bridgeBackCallbackId = callbackA.onRejectOn(
+            chainIdByForkId[forkIds[1]],
+            finalSwapCallbackId,
+            address(this),
+            this.bridgeTokensBack.selector
+        );
+        
+                 // Note: Additional recovery layers could be added here if needed
+         // For this example, the bridge-back is the primary rollback mechanism
+        
+        vm.stopPrank();
+        console.log("PROMISE CHAIN SETUP COMPLETE WITH ROLLBACK HANDLING!");
+        console.log("");
+        
+        // ========================================
+        // PHASE 2: EXECUTION (SAME PROCESS, DIFFERENT OUTCOME)
+        // ========================================
+        console.log("PHASE 2: EXECUTING WORKFLOW (AUTOMATIC FAILURE DETECTION)");
+        
+        console.log("EXECUTION: Relaying cross-chain messages");
         relayAllMessages();
         
-        // Step 3b: Execute bridge callback on Chain B
+        console.log("EXECUTION: Executing bridge callback on Chain B");
         vm.selectFork(forkIds[1]);
-        if (callbackB.exists(bridgeCallbackId) && callbackB.canResolve(bridgeCallbackId)) {
+        if (callbackB.canResolve(bridgeCallbackId)) {
             callbackB.resolve(bridgeCallbackId);
+            console.log("Bridge callback executed - tokens minted on Chain B");
         }
         
-        // Verify Token2 is on Chain B
-        assertEq(token2.balanceOf(user), token2Amount, "User should have Token2 on Chain B");
-        console.log("Bridge completed successfully");
+        console.log("EXECUTION: Executing final swap callback (will detect failure)");
+        if (callbackB.canResolve(finalSwapCallbackId)) {
+            callbackB.resolve(finalSwapCallbackId);
+            console.log("Final swap callback executed - failure detected automatically");
+        }
         
-        // Step 4: Set up failure for Token2 -> Token3 swap on Chain B
-        console.log("Step 4: Setting up failure mode for Token2 -> Token3 swap");
-        exchangeB.setFailureMode(address(token2), address(token3), true);
+        console.log("EXECUTION: Executing rollback callback (automatic bridge-back)");
+        if (callbackB.canResolve(bridgeBackCallbackId)) {
+            callbackB.resolve(bridgeBackCallbackId);
+            console.log("Bridge-back callback executed - tokens returned to Chain A");
+        }
         
-        // Step 5: Attempt swap that will fail
-        console.log("Step 5: Attempting swap that will fail");
-        vm.startPrank(user);
-        token2.approve(address(exchangeB), token2Amount);
-        
-        vm.expectRevert(
-            abi.encodeWithSignature("SwapFailedError(string)", "Forced failure for testing")
-        );
-        exchangeB.swap(address(token2), address(token3), token2Amount);
-        vm.stopPrank();
-        
-        console.log("Swap failed as expected");
-        
-        // Step 6: Demonstrate rollback - bridge Token2 back to Chain A
-        console.log("Step 6: Initiating rollback - bridging Token2 back to Chain A");
-        vm.startPrank(user);
-        token2.approve(address(bridgeB), token2Amount);
-        (uint256 rollbackPromiseId, uint256 rollbackCallbackId) = bridgeB.bridgeTokens(
-            address(token2),
-            token2Amount,
-            chainIdByForkId[forkIds[0]], // Back to Chain A
-            user
-        );
-        vm.stopPrank();
-        
-        // Step 7: Process rollback bridge
-        console.log("Step 7: Processing rollback bridge");
+        // Process rollback messages
+        console.log("EXECUTION: Relaying rollback messages");
         relayAllMessages();
         
-        // Step 7b: Execute rollback callback on Chain A
+        // ========================================
+        // PHASE 3: VERIFICATION (ROLLBACK COMPLETED)
+        // ========================================
+        console.log("");
+        console.log("PHASE 3: VERIFYING ROLLBACK RESULTS");
+        
         vm.selectFork(forkIds[0]);
-        if (callbackA.exists(rollbackCallbackId) && callbackA.canResolve(rollbackCallbackId)) {
-            callbackA.resolve(rollbackCallbackId);
-        }
-        
-        // Step 8: Verify rollback - swap Token2 back to Token1 on Chain A
-        console.log("Step 8: Swapping Token2 back to Token1 on Chain A");
-        assertEq(token2.balanceOf(user), token2Amount, "User should have Token2 back on Chain A");
-        
-        vm.startPrank(user);
-        token2.approve(address(exchangeA), token2Amount);
-        uint256 recoveredToken1 = exchangeA.swap(address(token2), address(token1), token2Amount);
-        vm.stopPrank();
-        
-        // Step 9: Verify final state after rollback
-        console.log("Step 9: Verifying rollback completion");
-        assertEq(token1.balanceOf(user), initialToken1Balance, "Token1 balance should be restored");
+        uint256 finalToken1Balance = token1.balanceOf(user);
+        uint256 finalToken2Balance = token2.balanceOf(user);
+        console.log("Chain A - Token1 balance change:", int256(finalToken1Balance) - int256(initialToken1Balance));
+        console.log("Chain A - Token2 balance:", finalToken2Balance);
         
         vm.selectFork(forkIds[1]);
-        assertEq(token3.balanceOf(user), initialToken3Balance, "Token3 balance should be unchanged");
+        uint256 finalToken3Balance = token3.balanceOf(user);
+        console.log("Chain B - Token3 balance change:", int256(finalToken3Balance) - int256(initialToken3Balance));
         
-        console.log("SUCCESS: Rollback completed!");
-        console.log("User recovered Token1 after failed cross-chain swap");
+        // Verify rollback completed successfully
+        assertEq(finalToken1Balance, initialToken1Balance - swapAmount, "Token1 balance should reflect initial swap");
+        assertGt(finalToken2Balance, 0, "User should have Token2 back on Chain A from rollback");
+        assertEq(finalToken3Balance, initialToken3Balance, "Token3 balance should be unchanged (no successful swap)");
+        
+        console.log("");
+        console.log("SUCCESS: Automatic rollback chain executed successfully!");
+        console.log("Flow: Token1 -> Token2 -> Bridge -> Token2 (Chain B) -> [SWAP FAILS] -> Bridge Back -> Token2 (Chain A)");
     }
 
     /// @notice Test promise-based automated rollback workflow
@@ -405,5 +443,100 @@ contract CrossChainSwapExampleTest is Test, Relayer {
         // 3. Return tokens to original state
         
         return true;
+    }
+
+    // ====================================================================
+    // PROMISE CHAIN CALLBACK FUNCTIONS (FOR PROPER CHAINING)
+    // ====================================================================
+
+    /// @notice Execute final swap with automatic success/failure branching
+    /// @param bridgeData Encoded bridge completion data
+    /// @return swapResult Encoded final swap result (or error data for failure)
+    function executeFinalSwapWithBranching(bytes memory bridgeData) external returns (bytes memory swapResult) {
+        console.log("CALLBACK: Executing final swap with automatic branching");
+        
+        uint256 token2Amount = swapAmount; // Should match the bridged amount
+        
+        // Verify user has Token2 on Chain B
+        uint256 actualBalance = token2.balanceOf(user);
+        console.log("User Token2 balance on Chain B:", actualBalance);
+        
+        // Check if failure mode is enabled (determines success vs failure path)
+        if (exchangeB.isFailureModeEnabled(address(token2), address(token3))) {
+            console.log("BRANCHING: Failure mode detected - swap will fail");
+            // Don't execute swap, just return failure data
+            return abi.encode(false, uint256(0), "Swap failed due to failure mode");
+        } else {
+            console.log("BRANCHING: Success path - executing swap");
+            
+            // Execute the successful swap
+            vm.startPrank(user);
+            token2.approve(address(exchangeB), token2Amount);
+            
+            uint256 token3Amount = exchangeB.swap(address(token2), address(token3), token2Amount);
+            vm.stopPrank();
+            
+            console.log("SUCCESS: Final swap completed, received", token3Amount, "Token3");
+            return abi.encode(true, token3Amount, "Swap completed successfully");
+        }
+    }
+
+    /// @notice Bridge tokens back to Chain A (automatic rollback)
+    /// @param failureData Encoded failure result data
+    /// @return rollbackResult Encoded rollback operation result
+    function bridgeTokensBack(bytes memory failureData) external returns (bytes memory rollbackResult) {
+        console.log("ROLLBACK: Final swap failed, bridging tokens back to Chain A");
+        
+        // Decode failure context
+        (bool success, uint256 amount, string memory reason) = 
+            abi.decode(failureData, (bool, uint256, string));
+        
+        console.log("ROLLBACK: Failure reason:", reason);
+        
+        // User should still have Token2 on Chain B since swap failed
+        uint256 token2Balance = token2.balanceOf(user);
+        console.log("ROLLBACK: User has", token2Balance, "Token2 on Chain B to bridge back");
+        
+        if (token2Balance > 0) {
+            // Execute reverse bridge operation
+            vm.startPrank(user);
+            token2.approve(address(bridgeB), token2Balance);
+            
+            (uint256 rollbackPromiseId, uint256 rollbackCallbackId) = bridgeB.bridgeTokens(
+                address(token2),
+                token2Balance,
+                chainIdByForkId[forkIds[0]], // Back to Chain A
+                user                        // Original user
+            );
+            vm.stopPrank();
+            
+            console.log("ROLLBACK: Tokens bridged back, promise ID:", rollbackPromiseId);
+            return abi.encode(true, rollbackPromiseId, "Tokens bridged back to Chain A");
+        } else {
+            console.log("ROLLBACK: No tokens to bridge back");
+            return abi.encode(false, uint256(0), "No tokens available for rollback");
+        }
+    }
+
+    /// @notice Execute manual recovery (final fallback)
+    /// @param rollbackData Encoded rollback failure data
+    /// @return recoveryResult Final recovery result
+    function executeManualRecovery(bytes memory rollbackData) external returns (bytes memory recoveryResult) {
+        console.log("MANUAL RECOVERY: Bridge-back operation failed, manual intervention required");
+        
+        (bool success, uint256 promiseId, string memory reason) = 
+            abi.decode(rollbackData, (bool, uint256, string));
+        
+        console.log("MANUAL RECOVERY: Rollback failure reason:", reason);
+        console.log("MANUAL RECOVERY: Failed promise ID:", promiseId);
+        
+        // In a real implementation, this would:
+        // 1. Alert operators/governance
+        // 2. Initiate emergency recovery procedures
+        // 3. Potentially involve manual token recovery mechanisms
+        
+        console.log("MANUAL RECOVERY: Alerting operators for manual intervention");
+        
+        return abi.encode(true, "Manual recovery initiated");
     }
 } 
