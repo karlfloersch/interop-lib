@@ -36,11 +36,11 @@ contract CallbackAuthTest is Test {
     function test_callbackContextAvailableDuringExecution() public {
         // Alice creates a parent promise
         vm.prank(alice);
-        uint256 parentPromiseId = promiseContract.create();
+        bytes32 parentPromiseId = promiseContract.create();
         
         // Bob registers a callback
         vm.prank(bob);
-        uint256 callbackPromiseId = callbackContract.then(
+        bytes32 callbackPromiseId = callbackContract.then(
             parentPromiseId,
             address(contextTarget),
             contextTarget.handleWithContext.selector
@@ -73,10 +73,10 @@ contract CallbackAuthTest is Test {
 
     function test_callbackContextClearedAfterExecution() public {
         vm.prank(alice);
-        uint256 parentPromiseId = promiseContract.create();
+        bytes32 parentPromiseId = promiseContract.create();
         
         vm.prank(bob);
-        uint256 callbackPromiseId = callbackContract.then(
+        bytes32 callbackPromiseId = callbackContract.then(
             parentPromiseId,
             address(contextTarget),
             contextTarget.handleWithContext.selector
@@ -98,11 +98,11 @@ contract CallbackAuthTest is Test {
     function test_authorizedCallbackSucceeds() public {
         // Admin creates a promise that will trigger a vault operation
         vm.prank(admin);
-        uint256 promiseId = promiseContract.create();
+        bytes32 promiseId = promiseContract.create();
         
         // Trusted user registers a callback to perform a privileged operation
         vm.prank(trustedUser);
-        uint256 callbackId = callbackContract.then(
+        bytes32 callbackId = callbackContract.then(
             promiseId,
             address(vault),
             vault.performPrivilegedOperation.selector
@@ -125,11 +125,11 @@ contract CallbackAuthTest is Test {
     function test_unauthorizedCallbackFails() public {
         // Admin creates a promise
         vm.prank(admin);
-        uint256 promiseId = promiseContract.create();
+        bytes32 promiseId = promiseContract.create();
         
         // Untrusted user tries to register a callback for privileged operation
         vm.prank(untrustedUser);
-        uint256 callbackId = callbackContract.then(
+        bytes32 callbackId = callbackContract.then(
             promiseId,
             address(vault),
             vault.performPrivilegedOperation.selector
@@ -153,11 +153,11 @@ contract CallbackAuthTest is Test {
     function test_publicCallbackWorksForEveryone() public {
         // Admin creates a promise
         vm.prank(admin);
-        uint256 promiseId = promiseContract.create();
+        bytes32 promiseId = promiseContract.create();
         
         // Even unauthorized user can register public callbacks
         vm.prank(unauthorizedUser);
-        uint256 callbackId = callbackContract.then(
+        bytes32 callbackId = callbackContract.then(
             promiseId,
             address(vault),
             vault.performPublicOperation.selector
@@ -181,11 +181,11 @@ contract CallbackAuthTest is Test {
         // even when callback data comes from "cross-chain" (simulated)
         
         vm.prank(admin);
-        uint256 promiseId = promiseContract.create();
+        bytes32 promiseId = promiseContract.create();
         
         // Trusted user registers callback
         vm.prank(trustedUser);
-        uint256 callbackId = callbackContract.then(
+        bytes32 callbackId = callbackContract.then(
             promiseId,
             address(vault),
             vault.performChainSpecificOperation.selector
@@ -209,11 +209,11 @@ contract CallbackAuthTest is Test {
     function test_reentrancyProtectionWorks() public {
         // Alice creates a parent promise
         vm.prank(alice);
-        uint256 parentPromiseId = promiseContract.create();
+        bytes32 parentPromiseId = promiseContract.create();
         
         // Alice registers a callback with the malicious target
         vm.prank(alice);
-        uint256 callbackId = callbackContract.then(
+        bytes32 callbackId = callbackContract.then(
             parentPromiseId,
             address(maliciousTarget),
             maliciousTarget.maliciousCallback.selector
@@ -264,10 +264,10 @@ contract CallbackAuthTest is Test {
     function test_normalOperationUnaffected() public {
         // Test that normal callbacks work fine
         vm.prank(alice);
-        uint256 parentPromiseId = promiseContract.create();
+        bytes32 parentPromiseId = promiseContract.create();
         
         vm.prank(alice);
-        uint256 callbackId = callbackContract.then(
+        bytes32 callbackId = callbackContract.then(
             parentPromiseId,
             address(maliciousTarget),
             maliciousTarget.normalCallback.selector
@@ -401,7 +401,7 @@ contract SecureVault {
 /// @notice Target contract that attempts re-entrancy attacks
 contract MaliciousTarget {
     address public callbackContract;
-    uint256 public attackTarget;
+    bytes32 public attackTarget;
     bool public attackAttempted;
     bool public reentrancyBlocked;
     bool public normalCallbackExecuted;
@@ -410,7 +410,7 @@ contract MaliciousTarget {
         callbackContract = _callbackContract;
     }
     
-    function setAttackTarget(uint256 _callbackId) external {
+    function setAttackTarget(bytes32 _callbackId) external {
         attackTarget = _callbackId;
     }
     

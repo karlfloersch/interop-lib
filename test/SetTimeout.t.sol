@@ -12,9 +12,9 @@ contract SetTimeoutTest is Test {
     address public alice = address(0x1);
     address public bob = address(0x2);
 
-    event TimeoutCreated(uint256 indexed promiseId, uint256 timestamp);
-    event TimeoutResolved(uint256 indexed promiseId, uint256 timestamp);
-    event PromiseResolved(uint256 indexed promiseId, bytes returnData);
+    event TimeoutCreated(bytes32 indexed promiseId, uint256 timestamp);
+    event TimeoutResolved(bytes32 indexed promiseId, uint256 timestamp);
+    event PromiseResolved(bytes32 indexed promiseId, bytes returnData);
 
     function setUp() public {
         promiseContract = new Promise(address(0));
@@ -23,13 +23,13 @@ contract SetTimeoutTest is Test {
 
     function test_createTimeout() public {
         uint256 futureTimestamp = block.timestamp + 100;
-        uint256 expectedPromiseId = promiseContract.generatePromiseId(1);
+        bytes32 expectedPromiseId = promiseContract.generatePromiseId(bytes32(uint256(1)));
         
         vm.prank(alice);
         vm.expectEmit(true, false, false, true);
         emit TimeoutCreated(expectedPromiseId, futureTimestamp);
         
-        uint256 promiseId = setTimeout.create(futureTimestamp);
+        bytes32 promiseId = setTimeout.create(futureTimestamp);
         
         assertEq(promiseId, expectedPromiseId, "Promise ID should match expected global ID");
         assertEq(setTimeout.getTimeout(promiseId), futureTimestamp, "Timeout should match");
@@ -63,7 +63,7 @@ contract SetTimeoutTest is Test {
         uint256 futureTimestamp = block.timestamp + 100;
         
         vm.prank(alice);
-        uint256 promiseId = setTimeout.create(futureTimestamp);
+        bytes32 promiseId = setTimeout.create(futureTimestamp);
         
         // Fast forward time
         vm.warp(futureTimestamp);
@@ -88,7 +88,7 @@ contract SetTimeoutTest is Test {
         uint256 futureTimestamp = block.timestamp + 100;
         
         vm.prank(alice);
-        uint256 promiseId = setTimeout.create(futureTimestamp);
+        bytes32 promiseId = setTimeout.create(futureTimestamp);
         
         // Try to resolve before timeout
         vm.expectRevert("SetTimeout: timeout not reached");
@@ -97,14 +97,14 @@ contract SetTimeoutTest is Test {
 
     function test_cannotResolveNonExistentTimeout() public {
         vm.expectRevert("SetTimeout: promise does not exist");
-        setTimeout.resolve(999);
+        setTimeout.resolve(bytes32(uint256(999)));
     }
 
     function test_cannotResolveAlreadyResolvedTimeout() public {
         uint256 futureTimestamp = block.timestamp + 100;
         
         vm.prank(alice);
-        uint256 promiseId = setTimeout.create(futureTimestamp);
+        bytes32 promiseId = setTimeout.create(futureTimestamp);
         
         // Fast forward and resolve
         vm.warp(futureTimestamp);
@@ -118,14 +118,14 @@ contract SetTimeoutTest is Test {
     function test_multipleTimeouts() public {
         uint256 timestamp1 = block.timestamp + 50;
         uint256 timestamp2 = block.timestamp + 100;
-        uint256 expectedPromiseId1 = promiseContract.generatePromiseId(1);
-        uint256 expectedPromiseId2 = promiseContract.generatePromiseId(2);
+        bytes32 expectedPromiseId1 = promiseContract.generatePromiseId(bytes32(uint256(1)));
+        bytes32 expectedPromiseId2 = promiseContract.generatePromiseId(bytes32(uint256(2)));
         
         vm.prank(alice);
-        uint256 promiseId1 = setTimeout.create(timestamp1);
+        bytes32 promiseId1 = setTimeout.create(timestamp1);
         
         vm.prank(bob);
-        uint256 promiseId2 = setTimeout.create(timestamp2);
+        bytes32 promiseId2 = setTimeout.create(timestamp2);
         
         assertEq(promiseId1, expectedPromiseId1, "First promise ID should match expected global ID");
         assertEq(promiseId2, expectedPromiseId2, "Second promise ID should match expected global ID");
@@ -158,7 +158,7 @@ contract SetTimeoutTest is Test {
         uint256 futureTimestamp = block.timestamp + 1000;
         
         vm.prank(alice);
-        uint256 promiseId = setTimeout.create(futureTimestamp);
+        bytes32 promiseId = setTimeout.create(futureTimestamp);
         
         assertEq(setTimeout.getRemainingTime(promiseId), 1000, "Initial remaining time should be 1000");
         
@@ -176,22 +176,22 @@ contract SetTimeoutTest is Test {
     }
 
     function test_getTimeoutForNonExistentPromise() public {
-        assertEq(setTimeout.getTimeout(999), 0, "Non-existent promise should return 0 timeout");
+        assertEq(setTimeout.getTimeout(bytes32(uint256(999))), 0, "Non-existent promise should return 0 timeout");
     }
 
     function test_getRemainingTimeForNonExistentPromise() public {
-        assertEq(setTimeout.getRemainingTime(999), 0, "Non-existent promise should return 0 remaining time");
+        assertEq(setTimeout.getRemainingTime(bytes32(uint256(999))), 0, "Non-existent promise should return 0 remaining time");
     }
 
     function test_canResolveForNonExistentPromise() public {
-        assertFalse(setTimeout.canResolve(999), "Non-existent promise should not be resolvable");
+        assertFalse(setTimeout.canResolve(bytes32(uint256(999))), "Non-existent promise should not be resolvable");
     }
 
     function test_promiseContractIntegration() public {
         uint256 futureTimestamp = block.timestamp + 100;
         
         vm.prank(alice);
-        uint256 promiseId = setTimeout.create(futureTimestamp);
+        bytes32 promiseId = setTimeout.create(futureTimestamp);
         
         // Verify the promise was created with correct resolver
         Promise.PromiseData memory data = promiseContract.getPromise(promiseId);
@@ -213,7 +213,7 @@ contract SetTimeoutTest is Test {
         uint256 futureTimestamp = block.timestamp + 100;
         
         vm.prank(alice);
-        uint256 promiseId = setTimeout.create(futureTimestamp);
+        bytes32 promiseId = setTimeout.create(futureTimestamp);
         
         vm.warp(futureTimestamp);
         
@@ -231,7 +231,7 @@ contract SetTimeoutTest is Test {
         uint256 futureTimestamp = block.timestamp + delay;
         
         vm.prank(alice);
-        uint256 promiseId = setTimeout.create(futureTimestamp);
+        bytes32 promiseId = setTimeout.create(futureTimestamp);
         
         assertEq(setTimeout.getTimeout(promiseId), futureTimestamp, "Timeout should match");
         assertEq(setTimeout.getRemainingTime(promiseId), delay, "Remaining time should match delay");

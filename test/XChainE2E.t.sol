@@ -119,12 +119,12 @@ contract XChainE2ETest is Test, Relayer {
         vm.warp(block.timestamp + 3700); // Slightly past the interval
         
         // Resolve the timeout that should trigger this cycle (this will automatically execute the cycle)
-        uint256 triggerTimeoutId = cronScheduler.getNextTimeoutId(cycleId);
+        bytes32 triggerTimeoutId = cronScheduler.getNextTimeoutId(cycleId);
         assertTrue(setTimeoutA.canResolve(triggerTimeoutId), "Trigger timeout should be resolvable");
         setTimeoutA.resolve(triggerTimeoutId);
         
         // Resolve the automatic cycle execution callback
-        uint256 executionCallbackId = cronScheduler.getExecutionCallbackId(cycleId);
+        bytes32 executionCallbackId = cronScheduler.getExecutionCallbackId(cycleId);
         assertTrue(executionCallbackId > 0, "Should have execution callback ID");
         assertTrue(callbackA.canResolve(executionCallbackId), "Execution callback should be resolvable");
         callbackA.resolve(executionCallbackId);
@@ -139,12 +139,12 @@ contract XChainE2ETest is Test, Relayer {
         
         // Now the fee collection callbacks should be resolvable
         // Resolve Chain A fee collection
-        uint256 chainAFeeCollectionPromise = cronScheduler.getLastChainAFeePromise(cycleId);
+        bytes32 chainAFeeCollectionPromise = cronScheduler.getLastChainAFeePromise(cycleId);
         assertTrue(callbackA.canResolve(chainAFeeCollectionPromise), "Chain A fee collection should be resolvable");
         callbackA.resolve(chainAFeeCollectionPromise);
         
         // Resolve Chain B fee collection
-        uint256 chainBFeeCollectionPromise = cronScheduler.getLastChainBFeePromise(cycleId);
+        bytes32 chainBFeeCollectionPromise = cronScheduler.getLastChainBFeePromise(cycleId);
         vm.selectFork(forkIds[1]);
         assertTrue(callbackB.canResolve(chainBFeeCollectionPromise), "Chain B fee collection should be resolvable");
         callbackB.resolve(chainBFeeCollectionPromise);
@@ -156,12 +156,12 @@ contract XChainE2ETest is Test, Relayer {
         
         // Now the PromiseAll on Chain A should be resolvable
         vm.selectFork(forkIds[0]);
-        uint256 promiseAllId = cronScheduler.getLastPromiseAllId(cycleId);
+        bytes32 promiseAllId = cronScheduler.getLastPromiseAllId(cycleId);
         assertTrue(promiseAllA.canResolve(promiseAllId), "PromiseAll should be resolvable");
         promiseAllA.resolve(promiseAllId);
         
         // The burn callback should now be resolvable
-        uint256 burnCallbackId = cronScheduler.getLastBurnCallbackId(cycleId);
+        bytes32 burnCallbackId = cronScheduler.getLastBurnCallbackId(cycleId);
         assertTrue(callbackA.canResolve(burnCallbackId), "Burn callback should be resolvable");
         callbackA.resolve(burnCallbackId);
         
@@ -182,7 +182,7 @@ contract XChainE2ETest is Test, Relayer {
         assertTrue(cycle.active, "Cycle should still be active");
         
         // Verify the next timeout was scheduled
-        uint256 nextTimeoutId = cronScheduler.getNextTimeoutId(cycleId);
+        bytes32 nextTimeoutId = cronScheduler.getNextTimeoutId(cycleId);
         assertTrue(nextTimeoutId > 0, "Next timeout should be scheduled");
         assertEq(uint8(promiseA.status(nextTimeoutId)), uint8(Promise.PromiseStatus.Pending), "Next timeout should be pending");
     }
@@ -210,11 +210,11 @@ contract XChainE2ETest is Test, Relayer {
         vm.warp(block.timestamp + 1900);
         
         // Resolve the trigger timeout (this will automatically execute the cycle)
-        uint256 timeoutId = cronScheduler.getNextTimeoutId(cycleId);
+        bytes32 timeoutId = cronScheduler.getNextTimeoutId(cycleId);
         setTimeoutA.resolve(timeoutId);
         
         // Resolve the automatic cycle execution callback
-        uint256 executionCallbackId = cronScheduler.getExecutionCallbackId(cycleId);
+        bytes32 executionCallbackId = cronScheduler.getExecutionCallbackId(cycleId);
         assertTrue(executionCallbackId > 0, "Should have execution callback ID");
         assertTrue(callbackA.canResolve(executionCallbackId), "Execution callback should be resolvable");
         callbackA.resolve(executionCallbackId);
@@ -225,19 +225,19 @@ contract XChainE2ETest is Test, Relayer {
         relayAllMessages();
         
         // Resolve everything for first cycle
-        uint256 chainAPromise = cronScheduler.getLastChainAFeePromise(cycleId);
+        bytes32 chainAPromise = cronScheduler.getLastChainAFeePromise(cycleId);
         callbackA.resolve(chainAPromise);
         
-        uint256 chainBPromise = cronScheduler.getLastChainBFeePromise(cycleId);
+        bytes32 chainBPromise = cronScheduler.getLastChainBFeePromise(cycleId);
         vm.selectFork(forkIds[1]);
         callbackB.resolve(chainBPromise);
         promiseB.shareResolvedPromise(chainIdByForkId[forkIds[0]], chainBPromise);
         relayAllMessages();
         
         vm.selectFork(forkIds[0]);
-        uint256 promiseAllId = cronScheduler.getLastPromiseAllId(cycleId);
+        bytes32 promiseAllId = cronScheduler.getLastPromiseAllId(cycleId);
         promiseAllA.resolve(promiseAllId);
-        uint256 burnCallbackId = cronScheduler.getLastBurnCallbackId(cycleId);
+        bytes32 burnCallbackId = cronScheduler.getLastBurnCallbackId(cycleId);
         callbackA.resolve(burnCallbackId);
         
         // Verify first cycle completed
@@ -254,7 +254,7 @@ contract XChainE2ETest is Test, Relayer {
         vm.warp(block.timestamp + 1800); // Another 30 minutes
         
         // Resolve the next timeout (this will automatically execute the second cycle)
-        uint256 nextTimeoutId = cronScheduler.getNextTimeoutId(cycleId);
+        bytes32 nextTimeoutId = cronScheduler.getNextTimeoutId(cycleId);
         setTimeoutA.resolve(nextTimeoutId);
         
         // Resolve the automatic cycle execution callback for second cycle
@@ -341,11 +341,11 @@ contract XChainE2ETest is Test, Relayer {
         vm.warp(block.timestamp + 3700);
         
         // Resolve the timeout that should trigger this cycle (this will automatically execute the cycle)
-        uint256 triggerTimeoutId = cronScheduler.getNextTimeoutId(cycleId);
+        bytes32 triggerTimeoutId = cronScheduler.getNextTimeoutId(cycleId);
         setTimeoutA.resolve(triggerTimeoutId);
         
         // Resolve the automatic cycle execution callback
-        uint256 executionCallbackId = cronScheduler.getExecutionCallbackId(cycleId);
+        bytes32 executionCallbackId = cronScheduler.getExecutionCallbackId(cycleId);
         assertTrue(executionCallbackId > 0, "Should have execution callback ID");
         assertTrue(callbackA.canResolve(executionCallbackId), "Execution callback should be resolvable");
         callbackA.resolve(executionCallbackId);
@@ -356,7 +356,7 @@ contract XChainE2ETest is Test, Relayer {
         relayAllMessages();
         
         // Try to resolve the failing fee collection
-        uint256 chainAPromise = cronScheduler.getLastChainAFeePromise(cycleId);
+        bytes32 chainAPromise = cronScheduler.getLastChainAFeePromise(cycleId);
         assertTrue(callbackA.canResolve(chainAPromise), "Should be resolvable for rejection");
         callbackA.resolve(chainAPromise);
         
@@ -364,7 +364,7 @@ contract XChainE2ETest is Test, Relayer {
         assertEq(uint8(promiseA.status(chainAPromise)), uint8(Promise.PromiseStatus.Rejected), "Chain A fee collection should be rejected");
         
         // Also resolve Chain B fee collection (should succeed)
-        uint256 chainBPromise = cronScheduler.getLastChainBFeePromise(cycleId);
+        bytes32 chainBPromise = cronScheduler.getLastChainBFeePromise(cycleId);
         vm.selectFork(forkIds[1]);
         assertTrue(callbackB.canResolve(chainBPromise), "Chain B fee collection should be resolvable");
         callbackB.resolve(chainBPromise);
@@ -376,7 +376,7 @@ contract XChainE2ETest is Test, Relayer {
         
         // The PromiseAll should now be resolvable (for rejection due to Chain A failure)
         vm.selectFork(forkIds[0]);
-        uint256 promiseAllId = cronScheduler.getLastPromiseAllId(cycleId);
+        bytes32 promiseAllId = cronScheduler.getLastPromiseAllId(cycleId);
         assertTrue(promiseAllA.canResolve(promiseAllId), "PromiseAll should be resolvable for rejection");
         promiseAllA.resolve(promiseAllId);
         
@@ -384,7 +384,7 @@ contract XChainE2ETest is Test, Relayer {
         assertEq(uint8(promiseA.status(promiseAllId)), uint8(Promise.PromiseStatus.Rejected), "PromiseAll should be rejected");
         
         // The burn callback might be resolvable but should get rejected
-        uint256 burnCallbackId = cronScheduler.getLastBurnCallbackId(cycleId);
+        bytes32 burnCallbackId = cronScheduler.getLastBurnCallbackId(cycleId);
         if (callbackA.canResolve(burnCallbackId)) {
             // If it's resolvable, resolve it and verify it gets rejected
             callbackA.resolve(burnCallbackId);
@@ -408,7 +408,7 @@ contract XChainE2ETest is Test, Relayer {
         
         // **KEY DEMONSTRATION**: Chain B creates the timeout (the trigger)
         vm.selectFork(forkIds[1]);
-        uint256 remoteTimeoutId = setTimeoutB.create(block.timestamp + 1800); // 30 minutes
+        bytes32 remoteTimeoutId = setTimeoutB.create(block.timestamp + 1800); // 30 minutes
         
         // **REMOTE PROMISE CALLBACKS**: Chain A creates callbacks for the remote timeout promise
         // This demonstrates the new functionality - callbacks for promises that don't exist locally
@@ -418,13 +418,13 @@ contract XChainE2ETest is Test, Relayer {
         assertFalse(promiseA.exists(remoteTimeoutId), "Remote timeout should not exist locally on Chain A");
         
         // Chain A creates callbacks for the remote timeout (this is the new functionality!)
-        uint256 chainAFeeCallback = callbackA.then(
+        bytes32 chainAFeeCallback = callbackA.then(
             remoteTimeoutId,  // Remote promise ID from Chain B
             address(feeCollectorA),
             FeeCollector.collectFees.selector
         );
         
-        uint256 chainBFeeCallback = callbackA.thenOn(
+        bytes32 chainBFeeCallback = callbackA.thenOn(
             chainIdByForkId[forkIds[1]],
             remoteTimeoutId,  // Remote promise ID from Chain B  
             address(feeCollectorB),
@@ -446,14 +446,14 @@ contract XChainE2ETest is Test, Relayer {
         assertFalse(callbackA.canResolve(chainAFeeCallback), "Local callback should not be resolvable yet");
         
         // Chain A orchestrates the aggregation using the remote timeout
-        uint256[] memory feeCallbacks = new uint256[](2);
+        bytes32[] memory feeCallbacks = new bytes32[](2);
         feeCallbacks[0] = chainAFeeCallback;
         feeCallbacks[1] = chainBFeeCallback;
         
-        uint256 promiseAllId = promiseAllA.create(feeCallbacks);
+        bytes32 promiseAllId = promiseAllA.create(feeCallbacks);
         
         // Chain A sets up burning when all fees are collected
-        uint256 burnCallback = callbackA.then(
+        bytes32 burnCallback = callbackA.then(
             promiseAllId,
             address(feeBurner),
             FeeBurner.burnFees.selector
@@ -612,14 +612,14 @@ contract CronScheduler {
     
     // Storage for tracking cycles and their promises
     mapping(uint256 => CycleInfo) public cycles;
-    mapping(uint256 => uint256) public lastTimeoutIds;
-    mapping(uint256 => uint256) public lastChainAFeePromises;
-    mapping(uint256 => uint256) public lastChainBFeePromises;
-    mapping(uint256 => uint256) public lastPromiseAllIds;
-    mapping(uint256 => uint256) public lastBurnCallbackIds;
-    mapping(uint256 => uint256) public nextTimeoutIds;
-    mapping(uint256 => uint256) public timeoutToCycle; // Maps timeout ID to cycle ID
-    mapping(uint256 => uint256) public executionCallbackIds; // Maps cycle ID to execution callback ID
+    mapping(uint256 => bytes32) public lastTimeoutIds;
+    mapping(uint256 => bytes32) public lastChainAFeePromises;
+    mapping(uint256 => bytes32) public lastChainBFeePromises;
+    mapping(uint256 => bytes32) public lastPromiseAllIds;
+    mapping(uint256 => bytes32) public lastBurnCallbackIds;
+    mapping(uint256 => bytes32) public nextTimeoutIds;
+    mapping(bytes32 => uint256) public timeoutToCycle; // Maps timeout ID to cycle ID
+    mapping(uint256 => bytes32) public executionCallbackIds; // Maps cycle ID to execution callback ID
     
     uint256 public nextCycleId = 1;
     
@@ -663,14 +663,14 @@ contract CronScheduler {
         });
         
         // Schedule the first execution
-        uint256 firstTimeoutId = setTimeoutContract.create(block.timestamp + intervalSeconds);
+        bytes32 firstTimeoutId = setTimeoutContract.create(block.timestamp + intervalSeconds);
         nextTimeoutIds[cycleId] = firstTimeoutId;
         
         // Store the timeout-to-cycle mapping for automatic execution
         timeoutToCycle[firstTimeoutId] = cycleId;
         
         // Create callback for automatic first execution
-        uint256 executionCallbackId = callbackContract.then(
+        bytes32 executionCallbackId = callbackContract.then(
             firstTimeoutId,
             address(this),
             CronScheduler.executeCycleCallback.selector
@@ -685,13 +685,13 @@ contract CronScheduler {
         require(cycle.active, "CronScheduler: cycle not active");
         
         // Create cross-chain fee collection callbacks
-        uint256 chainAFeePromise = callbackContract.then(
+        bytes32 chainAFeePromise = callbackContract.then(
             nextTimeoutIds[cycleId],
             cycle.chainAFeeCollector,
             FeeCollector.collectFees.selector
         );
         
-        uint256 chainBFeePromise = callbackContract.thenOn(
+        bytes32 chainBFeePromise = callbackContract.thenOn(
             cycle.chainBId,
             nextTimeoutIds[cycleId],
             cycle.chainBFeeCollector,
@@ -699,27 +699,27 @@ contract CronScheduler {
         );
         
         // Create PromiseAll to wait for both fee collections
-        uint256[] memory feePromises = new uint256[](2);
+        bytes32[] memory feePromises = new bytes32[](2);
         feePromises[0] = chainAFeePromise;
         feePromises[1] = chainBFeePromise;
         
-        uint256 promiseAllId = promiseAllContract.create(feePromises);
+        bytes32 promiseAllId = promiseAllContract.create(feePromises);
         
         // Create burn callback that executes when both fees are collected
-        uint256 burnCallbackId = callbackContract.then(
+        bytes32 burnCallbackId = callbackContract.then(
             promiseAllId,
             cycle.feeBurner,
             FeeBurner.burnFees.selector
         );
         
         // **CRON MAGIC**: Schedule next execution automatically
-        uint256 nextTimeoutId = setTimeoutContract.create(block.timestamp + cycle.interval);
+        bytes32 nextTimeoutId = setTimeoutContract.create(block.timestamp + cycle.interval);
         
         // Store the timeout-to-cycle mapping for automatic execution
         timeoutToCycle[nextTimeoutId] = cycleId;
         
         // **AUTOMATIC TRIGGERING**: Create callback to automatically execute next cycle  
-        uint256 nextExecutionCallbackId = callbackContract.then(
+        bytes32 nextExecutionCallbackId = callbackContract.then(
             nextTimeoutId,
             address(this),
             CronScheduler.executeCycleCallback.selector
@@ -747,7 +747,7 @@ contract CronScheduler {
         for (uint256 cycleId = 1; cycleId < nextCycleId; cycleId++) {
             if (!cycles[cycleId].active) continue;
             
-            uint256 timeoutId = nextTimeoutIds[cycleId];
+            bytes32 timeoutId = nextTimeoutIds[cycleId];
             if (timeoutId > 0 && 
                 promiseContract.status(timeoutId) == Promise.PromiseStatus.Resolved &&
                 (cycles[cycleId].lastExecution == 0 || block.timestamp >= cycles[cycleId].lastExecution + cycles[cycleId].interval)) {
@@ -767,31 +767,31 @@ contract CronScheduler {
         return cycles[cycleId];
     }
     
-    function getLastChainAFeePromise(uint256 cycleId) external view returns (uint256) {
+    function getLastChainAFeePromise(uint256 cycleId) external view returns (bytes32) {
         return lastChainAFeePromises[cycleId];
     }
     
-    function getLastChainBFeePromise(uint256 cycleId) external view returns (uint256) {
+    function getLastChainBFeePromise(uint256 cycleId) external view returns (bytes32) {
         return lastChainBFeePromises[cycleId];
     }
     
-    function getLastPromiseAllId(uint256 cycleId) external view returns (uint256) {
+    function getLastPromiseAllId(uint256 cycleId) external view returns (bytes32) {
         return lastPromiseAllIds[cycleId];
     }
     
-    function getLastBurnCallbackId(uint256 cycleId) external view returns (uint256) {
+    function getLastBurnCallbackId(uint256 cycleId) external view returns (bytes32) {
         return lastBurnCallbackIds[cycleId];
     }
     
-    function getLastTimeoutId(uint256 cycleId) external view returns (uint256) {
+    function getLastTimeoutId(uint256 cycleId) external view returns (bytes32) {
         return lastTimeoutIds[cycleId];
     }
     
-    function getNextTimeoutId(uint256 cycleId) external view returns (uint256) {
+    function getNextTimeoutId(uint256 cycleId) external view returns (bytes32) {
         return nextTimeoutIds[cycleId];
     }
     
-    function getExecutionCallbackId(uint256 cycleId) external view returns (uint256) {
+    function getExecutionCallbackId(uint256 cycleId) external view returns (bytes32) {
         return executionCallbackIds[cycleId];
     }
 } 

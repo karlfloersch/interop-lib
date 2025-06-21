@@ -11,13 +11,13 @@ contract SetTimeout is IResolvable {
     Promise public immutable promiseContract;
 
     /// @notice Mapping from promise ID to target timestamp
-    mapping(uint256 => uint256) public timeouts;
+    mapping(bytes32 => uint256) public timeouts;
 
     /// @notice Event emitted when a timeout promise is created
-    event TimeoutCreated(uint256 indexed promiseId, uint256 timestamp);
+    event TimeoutCreated(bytes32 indexed promiseId, uint256 timestamp);
 
     /// @notice Event emitted when a timeout promise is resolved
-    event TimeoutResolved(uint256 indexed promiseId, uint256 timestamp);
+    event TimeoutResolved(bytes32 indexed promiseId, uint256 timestamp);
 
     /// @param _promiseContract The address of the Promise contract
     constructor(address _promiseContract) {
@@ -27,7 +27,7 @@ contract SetTimeout is IResolvable {
     /// @notice Create a new timeout promise that resolves after the specified timestamp
     /// @param timestamp The timestamp after which the promise can be resolved
     /// @return promiseId The ID of the created promise
-    function create(uint256 timestamp) external returns (uint256 promiseId) {
+    function create(uint256 timestamp) external returns (bytes32 promiseId) {
         require(timestamp > block.timestamp, "SetTimeout: timestamp must be in the future");
         
         // Create a promise via the Promise contract
@@ -41,7 +41,7 @@ contract SetTimeout is IResolvable {
 
     /// @notice Resolve a timeout promise if the timestamp has passed
     /// @param promiseId The ID of the promise to resolve
-    function resolve(uint256 promiseId) external {
+    function resolve(bytes32 promiseId) external {
         uint256 targetTimestamp = timeouts[promiseId];
         require(targetTimestamp != 0, "SetTimeout: promise does not exist");
         require(block.timestamp >= targetTimestamp, "SetTimeout: timeout not reached");
@@ -61,8 +61,8 @@ contract SetTimeout is IResolvable {
 
     /// @notice Check if a timeout promise can be resolved
     /// @param promiseId The ID of the promise to check
-    /// @return canResolve Whether the promise can be resolved now
-    function canResolve(uint256 promiseId) external view returns (bool canResolve) {
+    /// @return canResolveTimeout Whether the promise can be resolved now
+    function canResolve(bytes32 promiseId) external view returns (bool canResolveTimeout) {
         uint256 targetTimestamp = timeouts[promiseId];
         if (targetTimestamp == 0) return false;
         
@@ -75,14 +75,14 @@ contract SetTimeout is IResolvable {
     /// @notice Get the target timestamp for a timeout promise
     /// @param promiseId The ID of the promise
     /// @return timestamp The target timestamp, or 0 if promise doesn't exist
-    function getTimeout(uint256 promiseId) external view returns (uint256 timestamp) {
+    function getTimeout(bytes32 promiseId) external view returns (uint256 timestamp) {
         return timeouts[promiseId];
     }
 
     /// @notice Get the remaining time until a timeout promise can be resolved
     /// @param promiseId The ID of the promise
     /// @return remainingTime The remaining time in seconds, or 0 if can be resolved now
-    function getRemainingTime(uint256 promiseId) external view returns (uint256 remainingTime) {
+    function getRemainingTime(bytes32 promiseId) external view returns (uint256 remainingTime) {
         uint256 targetTimestamp = timeouts[promiseId];
         if (targetTimestamp == 0) return 0;
         

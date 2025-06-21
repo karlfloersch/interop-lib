@@ -36,10 +36,10 @@ contract PromiseHarnessTest is Test {
     function test_resolveTimeouts() public {
         // Create some timeout promises
         vm.prank(alice);
-        uint256 timeout1 = setTimeoutContract.create(block.timestamp + 100);
+        bytes32 timeout1 = setTimeoutContract.create(block.timestamp + 100);
         
         vm.prank(bob);
-        uint256 timeout2 = setTimeoutContract.create(block.timestamp + 200);
+        bytes32 timeout2 = setTimeoutContract.create(block.timestamp + 200);
         
         // Check pending count
         uint256 pendingPromises = harness.countPendingAuto();
@@ -73,15 +73,15 @@ contract PromiseHarnessTest is Test {
     function test_resolveCallbacks() public {
         // Create a manual promise that we'll resolve
         vm.prank(alice);
-        uint256 parentPromise = promiseContract.create();
+        bytes32 parentPromise = promiseContract.create();
         
         // Create callbacks on that promise
         TestTarget target = new TestTarget();
         vm.prank(bob);
-        uint256 callback1 = callbackContract.then(parentPromise, address(target), target.handleSuccess.selector);
+        bytes32 callback1 = callbackContract.then(parentPromise, address(target), target.handleSuccess.selector);
         
         vm.prank(bob);
-        uint256 callback2 = callbackContract.catchError(parentPromise, address(target), target.handleError.selector);
+        bytes32 callback2 = callbackContract.catchError(parentPromise, address(target), target.handleError.selector);
         
         // Check pending count
         uint256 pendingPromises = harness.countPendingAuto();
@@ -118,7 +118,7 @@ contract PromiseHarnessTest is Test {
         
         // Create a manual promise and callback
         vm.prank(alice);
-        uint256 parentPromise = promiseContract.create();
+        bytes32 parentPromise = promiseContract.create();
         
         TestTarget target = new TestTarget();
         vm.prank(bob);
@@ -145,13 +145,13 @@ contract PromiseHarnessTest is Test {
     function test_getAllPromiseStatuses() public {
         // Create some promises in different states
         vm.prank(alice);
-        uint256 promise1 = promiseContract.create(); // Will stay pending
+        bytes32 promise1 = promiseContract.create(); // Will stay pending
         
         vm.prank(alice);
-        uint256 promise2 = promiseContract.create(); // Will be resolved
+        bytes32 promise2 = promiseContract.create(); // Will be resolved
         
         vm.prank(alice);
-        uint256 promise3 = promiseContract.create(); // Will be rejected
+        bytes32 promise3 = promiseContract.create(); // Will be rejected
         
         // Resolve and reject some promises
         vm.prank(alice);
@@ -184,8 +184,8 @@ contract PromiseHarnessTest is Test {
         assertEq(promisesResolved, 3, "Should resolve exactly 3 promises");
         
         // Check that promises 4 and 5 are still pending
-        assertEq(uint256(promiseContract.status(4)), uint256(Promise.PromiseStatus.Pending), "Promise 4 should still be pending");
-        assertEq(uint256(promiseContract.status(5)), uint256(Promise.PromiseStatus.Pending), "Promise 5 should still be pending");
+        assertEq(uint256(promiseContract.status(bytes32(uint256(4)))), uint256(Promise.PromiseStatus.Pending), "Promise 4 should still be pending");
+        assertEq(uint256(promiseContract.status(bytes32(uint256(5)))), uint256(Promise.PromiseStatus.Pending), "Promise 5 should still be pending");
         
         // Resolve the rest
         promisesResolved = harness.resolveAllPending(5);
@@ -195,7 +195,7 @@ contract PromiseHarnessTest is Test {
     function test_handleResolveErrors() public {
         // Create a timeout
         vm.prank(alice);
-        uint256 timeoutPromise = setTimeoutContract.create(block.timestamp + 100);
+        bytes32 timeoutPromise = setTimeoutContract.create(block.timestamp + 100);
         
         // Fast forward time
         vm.warp(block.timestamp + 150);
@@ -219,12 +219,12 @@ contract PromiseHarnessTest is Test {
     function test_layeredResolution() public {
         // Create a timeout
         vm.prank(alice);
-        uint256 timeoutPromise = setTimeoutContract.create(block.timestamp + 100);
+        bytes32 timeoutPromise = setTimeoutContract.create(block.timestamp + 100);
         
         // Create callback on the timeout
         TestTarget target = new TestTarget();
         vm.prank(bob);
-        uint256 callbackPromise = callbackContract.then(timeoutPromise, address(target), target.handleSuccess.selector);
+        bytes32 callbackPromise = callbackContract.then(timeoutPromise, address(target), target.handleSuccess.selector);
         
         // Fast forward time
         vm.warp(block.timestamp + 150);
@@ -253,7 +253,7 @@ contract PromiseHarnessTest is Test {
     function test_resolveAllLayers() public {
         // Create a timeout
         vm.prank(alice);
-        uint256 timeoutPromise = setTimeoutContract.create(block.timestamp + 100);
+        bytes32 timeoutPromise = setTimeoutContract.create(block.timestamp + 100);
         
         // Create callback on the timeout
         TestTarget target = new TestTarget();

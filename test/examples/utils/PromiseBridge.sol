@@ -31,7 +31,7 @@ contract PromiseBridge {
     }
 
     /// @notice Mapping from promise ID to bridge operation data
-    mapping(uint256 => BridgeOperation) public bridgeOperations;
+    mapping(bytes32 => BridgeOperation) public bridgeOperations;
 
     /// @notice Event emitted when tokens are burned on source chain
     event TokensBurned(
@@ -40,7 +40,7 @@ contract PromiseBridge {
         uint256 amount,
         uint256 indexed destinationChain,
         address recipient,
-        uint256 promiseId
+        bytes32 promiseId
     );
 
     /// @notice Event emitted when tokens are minted on destination chain
@@ -49,12 +49,12 @@ contract PromiseBridge {
         address indexed recipient,
         uint256 amount,
         uint256 indexed sourceChain,
-        uint256 promiseId
+        bytes32 promiseId
     );
 
     /// @notice Event emitted when bridge operation completes
     event BridgeCompleted(
-        uint256 indexed promiseId,
+        bytes32 indexed promiseId,
         bool success
     );
 
@@ -85,7 +85,7 @@ contract PromiseBridge {
         uint256 amount,
         uint256 destinationChain,
         address recipient
-    ) external returns (uint256 promiseId, uint256 callbackPromiseId) {
+    ) external returns (bytes32 promiseId, bytes32 callbackPromiseId) {
         require(destinationChain != currentChainId, "Cannot bridge to same chain");
         require(amount > 0, "Amount must be greater than zero");
         require(recipient != address(0), "Invalid recipient");
@@ -164,21 +164,21 @@ contract PromiseBridge {
     /// @notice Get bridge operation details
     /// @param promiseId Promise ID of the bridge operation
     /// @return operation Bridge operation data
-    function getBridgeOperation(uint256 promiseId) external view returns (BridgeOperation memory operation) {
+    function getBridgeOperation(bytes32 promiseId) external view returns (BridgeOperation memory operation) {
         return bridgeOperations[promiseId];
     }
 
     /// @notice Check if a bridge operation exists
     /// @param promiseId Promise ID to check
     /// @return exists Whether the bridge operation exists
-    function bridgeExists(uint256 promiseId) external view returns (bool exists) {
+    function bridgeExists(bytes32 promiseId) external view returns (bool exists) {
         return bridgeOperations[promiseId].user != address(0);
     }
 
     /// @notice Emergency function to rollback a failed bridge
     /// @param promiseId Promise ID of the failed bridge
     /// @dev In a real implementation, this would have proper access control and verification
-    function rollback(uint256 promiseId) external {
+    function rollback(bytes32 promiseId) external {
         BridgeOperation storage operation = bridgeOperations[promiseId];
         require(operation.user == msg.sender, "Only bridge initiator can rollback");
         require(!operation.completed, "Bridge already completed");
@@ -208,7 +208,7 @@ contract PromiseBridge {
         uint256 amount,
         uint256 destinationChain,
         address recipient
-    ) external returns (uint256 bridgePromiseId, uint256 rollbackPromiseId) {
+    ) external returns (bytes32 bridgePromiseId, bytes32 rollbackPromiseId) {
         // Execute normal bridge
         (bridgePromiseId, ) = this.bridgeTokens(token, amount, destinationChain, recipient);
         

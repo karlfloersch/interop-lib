@@ -43,7 +43,7 @@ contract XChainPromiseTest is Test, Relayer {
         vm.selectFork(forkIds[0]);
         
         // Create a promise
-        uint256 promiseId = promiseA.create();
+        bytes32 promiseId = promiseA.create();
         assertEq(uint8(promiseA.status(promiseId)), uint8(Promise.PromiseStatus.Pending));
         assertTrue(promiseA.exists(promiseId));
         
@@ -62,7 +62,7 @@ contract XChainPromiseTest is Test, Relayer {
         vm.selectFork(forkIds[0]);
         
         // Create and reject a promise
-        uint256 promiseId = promiseA.create();
+        bytes32 promiseId = promiseA.create();
         promiseA.reject(promiseId, abi.encode("Error occurred"));
         
         // Verify rejection
@@ -76,27 +76,27 @@ contract XChainPromiseTest is Test, Relayer {
         vm.selectFork(forkIds[0]);
         
         // Create a promise on Chain A
-        uint256 promiseIdA = promiseA.create();
+        bytes32 promiseIdA = promiseA.create();
         uint256 chainAId = chainIdByForkId[forkIds[0]];
         
         // Verify the global ID generation is deterministic
-        uint256 expectedGlobalId = promiseA.generateGlobalPromiseId(chainAId, 1); // First promise
+        bytes32 expectedGlobalId = promiseA.generateGlobalPromiseId(chainAId, bytes32(uint256(1))); // First promise
         assertEq(promiseIdA, expectedGlobalId);
         
         // Create a promise on Chain B
         vm.selectFork(forkIds[1]);
-        uint256 promiseIdB = promiseB.create();
+        bytes32 promiseIdB = promiseB.create();
         uint256 chainBId = chainIdByForkId[forkIds[1]];
         
         // Verify it generates a different global ID
-        uint256 expectedGlobalIdB = promiseB.generateGlobalPromiseId(chainBId, 1); // First promise
+        bytes32 expectedGlobalIdB = promiseB.generateGlobalPromiseId(chainBId, bytes32(uint256(1))); // First promise
         assertEq(promiseIdB, expectedGlobalIdB);
         assertNotEq(promiseIdA, promiseIdB);
         
         // Verify promises can be distinguished by their origin chain
         vm.selectFork(forkIds[0]);
-        uint256 chainAIdFromA = promiseA.generateGlobalPromiseId(chainAId, 1);
-        uint256 chainBIdFromA = promiseA.generateGlobalPromiseId(chainBId, 1);
+        bytes32 chainAIdFromA = promiseA.generateGlobalPromiseId(chainAId, bytes32(uint256(1)));
+        bytes32 chainBIdFromA = promiseA.generateGlobalPromiseId(chainBId, bytes32(uint256(1)));
         assertEq(chainAIdFromA, promiseIdA);
         assertEq(chainBIdFromA, promiseIdB);
     }
@@ -106,7 +106,7 @@ contract XChainPromiseTest is Test, Relayer {
         vm.selectFork(forkIds[0]);
         
         // Create and resolve a promise on Chain A
-        uint256 promiseId = promiseA.create();
+        bytes32 promiseId = promiseA.create();
         promiseA.resolve(promiseId, abi.encode("Data from Chain A"));
         
         // Share the resolved promise to Chain B
@@ -129,7 +129,7 @@ contract XChainPromiseTest is Test, Relayer {
         vm.selectFork(forkIds[0]);
         
         // Create and reject a promise on Chain A
-        uint256 promiseId = promiseA.create();
+        bytes32 promiseId = promiseA.create();
         promiseA.reject(promiseId, abi.encode("Error from Chain A"));
         
         // Share the rejected promise to Chain B
@@ -152,7 +152,7 @@ contract XChainPromiseTest is Test, Relayer {
         vm.selectFork(forkIds[0]);
         
         // Create a promise on Chain A
-        uint256 promiseId = promiseA.create();
+        bytes32 promiseId = promiseA.create();
         
         // Transfer resolution rights to Chain B
         address newResolver = address(0x123);
@@ -191,7 +191,7 @@ contract XChainPromiseTest is Test, Relayer {
         vm.selectFork(forkIds[0]);
         
         // Try to share to the same chain (should revert)
-        uint256 promiseId = promiseA.create();
+        bytes32 promiseId = promiseA.create();
         uint256 chainAId = chainIdByForkId[forkIds[0]];
         vm.expectRevert("Promise: cannot share to same chain");
         promiseA.shareResolvedPromise(chainAId, promiseId);
@@ -206,7 +206,7 @@ contract XChainPromiseTest is Test, Relayer {
         vm.selectFork(forkIds[0]);
         
         // Create a promise
-        uint256 promiseId = promiseA.create();
+        bytes32 promiseId = promiseA.create();
         
         // Try to resolve from wrong account (should revert)
         vm.prank(address(0x999));
@@ -228,7 +228,7 @@ contract XChainPromiseTest is Test, Relayer {
         vm.selectFork(forkIds[0]);
         
         // Create and resolve a promise
-        uint256 promiseId = promiseA.create();
+        bytes32 promiseId = promiseA.create();
         promiseA.resolve(promiseId, abi.encode("first resolution"));
         
         // Try to resolve again (should revert)
@@ -245,7 +245,7 @@ contract XChainPromiseTest is Test, Relayer {
         vm.selectFork(forkIds[0]);
         
         // Check non-existent promise
-        uint256 fakePromiseId = 99999;
+        bytes32 fakePromiseId = bytes32(uint256(99999));
         assertEq(uint8(promiseA.status(fakePromiseId)), uint8(Promise.PromiseStatus.Pending));
         assertFalse(promiseA.exists(fakePromiseId));
         
@@ -261,7 +261,7 @@ contract XChainPromiseTest is Test, Relayer {
         vm.selectFork(forkIds[0]);
         
         // Create a pending promise
-        uint256 promiseId = promiseA.create();
+        bytes32 promiseId = promiseA.create();
         
         // Verify it's pending
         assertEq(uint8(promiseA.status(promiseId)), uint8(Promise.PromiseStatus.Pending), "Promise should be pending");
@@ -277,7 +277,7 @@ contract XChainPromiseTest is Test, Relayer {
         vm.selectFork(forkIds[0]);
         
         // Create and resolve a promise
-        uint256 promiseId = promiseA.create();
+        bytes32 promiseId = promiseA.create();
         promiseA.resolve(promiseId, "test data");
         
         // Verify it's resolved
@@ -299,7 +299,7 @@ contract XChainPromiseTest is Test, Relayer {
         vm.selectFork(forkIds[0]);
         
         // Create and reject a promise
-        uint256 promiseId = promiseA.create();
+        bytes32 promiseId = promiseA.create();
         promiseA.reject(promiseId, "test error");
         
         // Verify it's rejected

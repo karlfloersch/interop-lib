@@ -54,7 +54,7 @@ contract XChainCallbackTest is Test, Relayer {
         vm.selectFork(forkIds[0]);
         
         // Create parent promise on Chain A
-        uint256 parentPromiseId = promiseA.create();
+        bytes32 parentPromiseId = promiseA.create();
         
         // Create target contract on Chain B
         vm.selectFork(forkIds[1]);
@@ -63,7 +63,7 @@ contract XChainCallbackTest is Test, Relayer {
         // Register cross-chain callback from Chain A to Chain B
         vm.selectFork(forkIds[0]);
         uint256 chainBId = chainIdByForkId[forkIds[1]];
-        uint256 callbackPromiseId = callbackA.thenOn(
+        bytes32 callbackPromiseId = callbackA.thenOn(
             chainBId,
             parentPromiseId, 
             address(target), 
@@ -114,7 +114,7 @@ contract XChainCallbackTest is Test, Relayer {
         vm.selectFork(forkIds[0]);
         
         // Create parent promise on Chain A
-        uint256 parentPromiseId = promiseA.create();
+        bytes32 parentPromiseId = promiseA.create();
         
         // Create target contract on Chain B
         vm.selectFork(forkIds[1]);
@@ -123,7 +123,7 @@ contract XChainCallbackTest is Test, Relayer {
         // Register cross-chain catch callback from Chain A to Chain B
         vm.selectFork(forkIds[0]);
         uint256 chainBId = chainIdByForkId[forkIds[1]];
-        uint256 callbackPromiseId = callbackA.catchErrorOn(
+        bytes32 callbackPromiseId = callbackA.catchErrorOn(
             chainBId,
             parentPromiseId,
             address(target),
@@ -169,7 +169,7 @@ contract XChainCallbackTest is Test, Relayer {
         vm.selectFork(forkIds[0]);
         
         // Create parent promise on Chain A
-        uint256 parentPromiseId = promiseA.create();
+        bytes32 parentPromiseId = promiseA.create();
         
         // Create target contract on Chain B
         vm.selectFork(forkIds[1]);
@@ -178,7 +178,7 @@ contract XChainCallbackTest is Test, Relayer {
         // Register cross-chain then callback from Chain A to Chain B
         vm.selectFork(forkIds[0]);
         uint256 chainBId = chainIdByForkId[forkIds[1]];
-        uint256 callbackPromiseId = callbackA.thenOn(
+        bytes32 callbackPromiseId = callbackA.thenOn(
             chainBId,
             parentPromiseId,
             address(target),
@@ -210,7 +210,7 @@ contract XChainCallbackTest is Test, Relayer {
         vm.selectFork(forkIds[0]);
         
         // Try to register cross-chain callback to same chain (should revert)
-        uint256 parentPromiseId = promiseA.create();
+        bytes32 parentPromiseId = promiseA.create();
         uint256 chainAId = chainIdByForkId[forkIds[0]];
         
         vm.expectRevert("Callback: cannot register callback on same chain");
@@ -225,7 +225,7 @@ contract XChainCallbackTest is Test, Relayer {
         vm.selectFork(forkIds[0]);
         
         // Create parent promise on Chain A
-        uint256 parentPromiseId = promiseA.create();
+        bytes32 parentPromiseId = promiseA.create();
         
         // Create target contracts on Chain B
         vm.selectFork(forkIds[1]);
@@ -235,8 +235,8 @@ contract XChainCallbackTest is Test, Relayer {
         // Register multiple cross-chain callbacks from Chain A to Chain B
         vm.selectFork(forkIds[0]);
         uint256 chainBId = chainIdByForkId[forkIds[1]];
-        uint256 callback1 = callbackA.thenOn(chainBId, parentPromiseId, address(target1), target1.handleSuccess.selector);
-        uint256 callback2 = callbackA.thenOn(chainBId, parentPromiseId, address(target2), target2.handleSuccess.selector);
+        bytes32 callback1 = callbackA.thenOn(chainBId, parentPromiseId, address(target1), target1.handleSuccess.selector);
+        bytes32 callback2 = callbackA.thenOn(chainBId, parentPromiseId, address(target2), target2.handleSuccess.selector);
         
         // Relay callback registrations
         relayAllMessages();
@@ -266,7 +266,7 @@ contract XChainCallbackTest is Test, Relayer {
         vm.selectFork(forkIds[0]);
         
         // Create a promise on Chain A
-        uint256 remotePromiseId = promiseA.create();
+        bytes32 remotePromiseId = promiseA.create();
         
         // Create target contract on Chain B
         vm.selectFork(forkIds[1]);
@@ -274,7 +274,7 @@ contract XChainCallbackTest is Test, Relayer {
         
         // Create a callback on Chain B for the promise that only exists on Chain A
         // This should work now that we removed the existence check
-        uint256 callbackPromiseId = callbackB.then(
+        bytes32 callbackPromiseId = callbackB.then(
             remotePromiseId,
             address(target),
             target.handleSuccess.selector
@@ -317,14 +317,14 @@ contract XChainCallbackTest is Test, Relayer {
         vm.selectFork(forkIds[0]);
         
         // Create a promise on Chain A
-        uint256 remotePromiseId = promiseA.create();
+        bytes32 remotePromiseId = promiseA.create();
         
         // Create target contract on Chain B
         vm.selectFork(forkIds[1]);
         TestTarget target = new TestTarget();
         
         // Create a catch callback on Chain B for the promise that only exists on Chain A
-        uint256 callbackPromiseId = callbackB.catchError(
+        bytes32 callbackPromiseId = callbackB.catchError(
             remotePromiseId,
             address(target),
             target.handleError.selector
@@ -362,7 +362,7 @@ contract XChainCallbackTest is Test, Relayer {
         vm.selectFork(forkIds[0]);
         
         // Create a promise on Chain A
-        uint256 remotePromiseId = promiseA.create();
+        bytes32 remotePromiseId = promiseA.create();
         
         // Create multiple target contracts on Chain B
         vm.selectFork(forkIds[1]);
@@ -371,9 +371,9 @@ contract XChainCallbackTest is Test, Relayer {
         TestTarget errorTarget = new TestTarget();
         
         // Create multiple callbacks on Chain B for the same remote promise
-        uint256 callback1 = callbackB.then(remotePromiseId, address(target1), target1.handleSuccess.selector);
-        uint256 callback2 = callbackB.then(remotePromiseId, address(target2), target2.handleSuccess.selector);
-        uint256 errorCallback = callbackB.catchError(remotePromiseId, address(errorTarget), errorTarget.handleError.selector);
+        bytes32 callback1 = callbackB.then(remotePromiseId, address(target1), target1.handleSuccess.selector);
+        bytes32 callback2 = callbackB.then(remotePromiseId, address(target2), target2.handleSuccess.selector);
+        bytes32 errorCallback = callbackB.catchError(remotePromiseId, address(errorTarget), errorTarget.handleError.selector);
         
         // All callbacks should exist even though parent promise doesn't exist locally
         assertTrue(callbackB.exists(callback1), "Callback 1 should exist");
@@ -417,7 +417,7 @@ contract XChainCallbackTest is Test, Relayer {
         vm.selectFork(forkIds[0]);
         
         // Create a promise on Chain A
-        uint256 remotePromiseId = promiseA.create();
+        bytes32 remotePromiseId = promiseA.create();
         
         // Create target contract on Chain B
         vm.selectFork(forkIds[1]);
@@ -426,7 +426,7 @@ contract XChainCallbackTest is Test, Relayer {
         // Register cross-chain callback from Chain A to Chain B for the promise on Chain A
         vm.selectFork(forkIds[0]);
         uint256 chainBId = chainIdByForkId[forkIds[1]];
-        uint256 callbackPromiseId = callbackA.thenOn(
+        bytes32 callbackPromiseId = callbackA.thenOn(
             chainBId,
             remotePromiseId,
             address(target),
@@ -474,7 +474,7 @@ contract XChainCallbackTest is Test, Relayer {
         vm.selectFork(forkIds[0]);
         
         // Create parent promise
-        uint256 parentPromiseId = promiseA.create();
+        bytes32 parentPromiseId = promiseA.create();
         uint256 chainAId = chainIdByForkId[forkIds[0]];
         
         // Create target contract
@@ -485,7 +485,7 @@ contract XChainCallbackTest is Test, Relayer {
         vm.selectFork(forkIds[0]);
         address alice = address(0x1);
         vm.prank(alice);
-        uint256 thenCallbackId = callbackA.then(
+        bytes32 thenCallbackId = callbackA.then(
             parentPromiseId,
             address(target),
             target.handleSuccess.selector
@@ -494,7 +494,7 @@ contract XChainCallbackTest is Test, Relayer {
         // Register catch callback as bob
         address bob = address(0x2);
         vm.prank(bob);
-        uint256 catchCallbackId = callbackA.catchError(
+        bytes32 catchCallbackId = callbackA.catchError(
             parentPromiseId,
             address(target),
             target.handleError.selector
@@ -516,7 +516,7 @@ contract XChainCallbackTest is Test, Relayer {
         vm.selectFork(forkIds[0]);
         
         // Create parent promise on Chain A
-        uint256 parentPromiseId = promiseA.create();
+        bytes32 parentPromiseId = promiseA.create();
         uint256 chainAId = chainIdByForkId[forkIds[0]];
         uint256 chainBId = chainIdByForkId[forkIds[1]];
         
@@ -528,7 +528,7 @@ contract XChainCallbackTest is Test, Relayer {
         vm.selectFork(forkIds[0]);
         address alice = address(0x1);
         vm.prank(alice);
-        uint256 callbackPromiseId = callbackA.thenOn(
+        bytes32 callbackPromiseId = callbackA.thenOn(
             chainBId,
             parentPromiseId,
             address(target),
@@ -554,11 +554,11 @@ contract XChainCallbackTest is Test, Relayer {
         vm.selectFork(forkIds[0]);
         
         // Create promises on both chains
-        uint256 promiseA1 = promiseA.create();
-        uint256 promiseA2 = promiseA.create();
+        bytes32 promiseA1 = promiseA.create();
+        bytes32 promiseA2 = promiseA.create();
         
         vm.selectFork(forkIds[1]);
-        uint256 promiseB1 = promiseB.create();
+        bytes32 promiseB1 = promiseB.create();
         TestTarget target = new TestTarget();
         
         uint256 chainAId = chainIdByForkId[forkIds[0]];
@@ -572,7 +572,7 @@ contract XChainCallbackTest is Test, Relayer {
         // Alice registers local callback on Chain A
         vm.selectFork(forkIds[0]);
         vm.prank(alice);
-        uint256 aliceLocalCallback = callbackA.then(
+        bytes32 aliceLocalCallback = callbackA.then(
             promiseA1,
             address(target),
             target.handleSuccess.selector
@@ -580,7 +580,7 @@ contract XChainCallbackTest is Test, Relayer {
         
         // Bob registers cross-chain callback from Chain A to Chain B
         vm.prank(bob);
-        uint256 bobXChainCallback = callbackA.catchErrorOn(
+        bytes32 bobXChainCallback = callbackA.catchErrorOn(
             chainBId,
             promiseA2,
             address(target),
@@ -590,7 +590,7 @@ contract XChainCallbackTest is Test, Relayer {
         // Charlie registers local callback on Chain B
         vm.selectFork(forkIds[1]);
         vm.prank(charlie);
-        uint256 charlieLocalCallback = callbackB.then(
+        bytes32 charlieLocalCallback = callbackB.then(
             promiseB1,
             address(target),
             target.handleSuccess.selector
@@ -623,7 +623,7 @@ contract XChainCallbackTest is Test, Relayer {
         vm.selectFork(forkIds[0]);
         
         // Create parent promise
-        uint256 parentPromiseId = promiseA.create();
+        bytes32 parentPromiseId = promiseA.create();
         uint256 chainBId = chainIdByForkId[forkIds[1]];
         
         // Create target on Chain B
@@ -634,7 +634,7 @@ contract XChainCallbackTest is Test, Relayer {
         vm.selectFork(forkIds[0]);
         address registrant = address(0x123);
         vm.prank(registrant);
-        uint256 callbackPromiseId = callbackA.thenOn(
+        bytes32 callbackPromiseId = callbackA.thenOn(
             chainBId,
             parentPromiseId,
             address(target),

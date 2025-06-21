@@ -15,9 +15,9 @@ contract PromiseAllTest is Test {
     address public bob = address(0x2);
     address public charlie = address(0x3);
 
-    event PromiseAllCreated(uint256 indexed promiseAllId, uint256[] inputPromises);
-    event PromiseAllResolved(uint256 indexed promiseAllId, bytes[] values);
-    event PromiseAllRejected(uint256 indexed promiseAllId, uint256 failedPromiseId, bytes errorData);
+    event PromiseAllCreated(bytes32 indexed promiseAllId, bytes32[] inputPromises);
+    event PromiseAllResolved(bytes32 indexed promiseAllId, bytes[] values);
+    event PromiseAllRejected(bytes32 indexed promiseAllId, bytes32 failedPromiseId, bytes errorData);
 
     function setUp() public {
         promiseContract = new Promise(address(0));
@@ -28,21 +28,21 @@ contract PromiseAllTest is Test {
     function test_createPromiseAll() public {
         // Create some input promises
         vm.prank(alice);
-        uint256 promise1 = promiseContract.create();
+        bytes32 promise1 = promiseContract.create();
         
         vm.prank(bob);
-        uint256 promise2 = promiseContract.create();
+        bytes32 promise2 = promiseContract.create();
         
-        uint256[] memory inputPromises = new uint256[](2);
+        bytes32[] memory inputPromises = new bytes32[](2);
         inputPromises[0] = promise1;
         inputPromises[1] = promise2;
         
         // Create PromiseAll
         vm.expectEmit(false, false, false, true);
-        emit PromiseAllCreated(0, inputPromises); // promiseAllId will be 3
+        emit PromiseAllCreated(bytes32(0), inputPromises); // promiseAllId will be 3
         
         vm.prank(charlie);
-        uint256 promiseAllId = promiseAllContract.create(inputPromises);
+        bytes32 promiseAllId = promiseAllContract.create(inputPromises);
         
         // Verify the PromiseAll was created
         assertTrue(promiseAllContract.exists(promiseAllId), "PromiseAll should exist");
@@ -50,7 +50,7 @@ contract PromiseAllTest is Test {
         assertEq(uint256(promiseContract.status(promiseAllId)), uint256(Promise.PromiseStatus.Pending), "PromiseAll should be pending");
         
         // Check input promises
-        uint256[] memory retrievedInputs = promiseAllContract.getInputPromises(promiseAllId);
+        bytes32[] memory retrievedInputs = promiseAllContract.getInputPromises(promiseAllId);
         assertEq(retrievedInputs.length, 2, "Should have 2 input promises");
         assertEq(retrievedInputs[0], promise1, "First input should match");
         assertEq(retrievedInputs[1], promise2, "Second input should match");
@@ -63,26 +63,26 @@ contract PromiseAllTest is Test {
     }
 
     function test_cannotCreateWithEmptyArray() public {
-        uint256[] memory emptyArray = new uint256[](0);
+        bytes32[] memory emptyArray = new bytes32[](0);
         
         vm.expectRevert("PromiseAll: empty input array");
         promiseAllContract.create(emptyArray);
     }
 
     function test_canCreateWithNonExistentPromise() public {
-        uint256[] memory inputPromises = new uint256[](1);
-        inputPromises[0] = 999; // Non-existent promise (could be cross-chain)
+        bytes32[] memory inputPromises = new bytes32[](1);
+        inputPromises[0] = bytes32(uint256(999)); // Non-existent promise (could be cross-chain)
         
         // Should succeed - allows cross-chain promises that haven't been shared yet
-        uint256 promiseAllId = promiseAllContract.create(inputPromises);
+        bytes32 promiseAllId = promiseAllContract.create(inputPromises);
         
         // Verify the PromiseAll was created
         assertTrue(promiseAllContract.exists(promiseAllId), "PromiseAll should exist");
         
         // Verify it contains the non-existent promise ID
-        uint256[] memory retrievedInputs = promiseAllContract.getInputPromises(promiseAllId);
+        bytes32[] memory retrievedInputs = promiseAllContract.getInputPromises(promiseAllId);
         assertEq(retrievedInputs.length, 1, "Should have 1 input promise");
-        assertEq(retrievedInputs[0], 999, "Input should match non-existent promise ID");
+        assertEq(retrievedInputs[0], bytes32(uint256(999)), "Input should match non-existent promise ID");
         
         // Should not be resolvable since the promise doesn't exist (is pending)
         assertFalse(promiseAllContract.canResolve(promiseAllId), "Should not be resolvable with non-existent promise");
@@ -91,18 +91,18 @@ contract PromiseAllTest is Test {
     function test_resolveWhenAllPromisesResolve() public {
         // Create input promises
         vm.prank(alice);
-        uint256 promise1 = promiseContract.create();
+        bytes32 promise1 = promiseContract.create();
         
         vm.prank(alice);
-        uint256 promise2 = promiseContract.create();
+        bytes32 promise2 = promiseContract.create();
         
-        uint256[] memory inputPromises = new uint256[](2);
+        bytes32[] memory inputPromises = new bytes32[](2);
         inputPromises[0] = promise1;
         inputPromises[1] = promise2;
         
         // Create PromiseAll
         vm.prank(charlie);
-        uint256 promiseAllId = promiseAllContract.create(inputPromises);
+        bytes32 promiseAllId = promiseAllContract.create(inputPromises);
         
         // Initially cannot resolve
         assertFalse(promiseAllContract.canResolve(promiseAllId), "Should not be resolvable initially");
@@ -154,22 +154,22 @@ contract PromiseAllTest is Test {
     function test_rejectWhenAnyPromiseRejects() public {
         // Create input promises
         vm.prank(alice);
-        uint256 promise1 = promiseContract.create();
+        bytes32 promise1 = promiseContract.create();
         
         vm.prank(alice);
-        uint256 promise2 = promiseContract.create();
+        bytes32 promise2 = promiseContract.create();
         
         vm.prank(alice);
-        uint256 promise3 = promiseContract.create();
+        bytes32 promise3 = promiseContract.create();
         
-        uint256[] memory inputPromises = new uint256[](3);
+        bytes32[] memory inputPromises = new bytes32[](3);
         inputPromises[0] = promise1;
         inputPromises[1] = promise2;
         inputPromises[2] = promise3;
         
         // Create PromiseAll
         vm.prank(charlie);
-        uint256 promiseAllId = promiseAllContract.create(inputPromises);
+        bytes32 promiseAllId = promiseAllContract.create(inputPromises);
         
         // Resolve first promise
         vm.prank(alice);
@@ -205,18 +205,18 @@ contract PromiseAllTest is Test {
     function test_integrationWithSetTimeout() public {
         // Create some timeout promises
         vm.prank(alice);
-        uint256 timeout1 = setTimeoutContract.create(block.timestamp + 100);
+        bytes32 timeout1 = setTimeoutContract.create(block.timestamp + 100);
         
         vm.prank(alice);
-        uint256 timeout2 = setTimeoutContract.create(block.timestamp + 200);
+        bytes32 timeout2 = setTimeoutContract.create(block.timestamp + 200);
         
-        uint256[] memory inputPromises = new uint256[](2);
+        bytes32[] memory inputPromises = new bytes32[](2);
         inputPromises[0] = timeout1;
         inputPromises[1] = timeout2;
         
         // Create PromiseAll
         vm.prank(charlie);
-        uint256 promiseAllId = promiseAllContract.create(inputPromises);
+        bytes32 promiseAllId = promiseAllContract.create(inputPromises);
         
         // Initially cannot resolve
         assertFalse(promiseAllContract.canResolve(promiseAllId), "Should not be resolvable initially");
@@ -252,19 +252,19 @@ contract PromiseAllTest is Test {
     function test_mixedPromiseTypes() public {
         // Create a manual promise
         vm.prank(alice);
-        uint256 manualPromise = promiseContract.create();
+        bytes32 manualPromise = promiseContract.create();
         
         // Create a timeout promise
         vm.prank(alice);
-        uint256 timeoutPromise = setTimeoutContract.create(block.timestamp + 100);
+        bytes32 timeoutPromise = setTimeoutContract.create(block.timestamp + 100);
         
-        uint256[] memory inputPromises = new uint256[](2);
+        bytes32[] memory inputPromises = new bytes32[](2);
         inputPromises[0] = manualPromise;
         inputPromises[1] = timeoutPromise;
         
         // Create PromiseAll
         vm.prank(charlie);
-        uint256 promiseAllId = promiseAllContract.create(inputPromises);
+        bytes32 promiseAllId = promiseAllContract.create(inputPromises);
         
         // Resolve manual promise
         vm.prank(alice);
@@ -292,19 +292,19 @@ contract PromiseAllTest is Test {
 
     function test_cannotResolveNonExistentPromiseAll() public {
         vm.expectRevert("PromiseAll: promise does not exist");
-        promiseAllContract.resolve(999);
+        promiseAllContract.resolve(bytes32(uint256(999)));
     }
 
     function test_cannotResolveAlreadySettled() public {
         // Create and resolve a PromiseAll
         vm.prank(alice);
-        uint256 promise1 = promiseContract.create();
+        bytes32 promise1 = promiseContract.create();
         
-        uint256[] memory inputPromises = new uint256[](1);
+        bytes32[] memory inputPromises = new bytes32[](1);
         inputPromises[0] = promise1;
         
         vm.prank(charlie);
-        uint256 promiseAllId = promiseAllContract.create(inputPromises);
+        bytes32 promiseAllId = promiseAllContract.create(inputPromises);
         
         // Resolve input promise
         vm.prank(alice);
@@ -320,17 +320,17 @@ contract PromiseAllTest is Test {
 
     function test_cannotResolveBeforeAllResolved() public {
         vm.prank(alice);
-        uint256 promise1 = promiseContract.create();
+        bytes32 promise1 = promiseContract.create();
         
         vm.prank(alice);
-        uint256 promise2 = promiseContract.create();
+        bytes32 promise2 = promiseContract.create();
         
-        uint256[] memory inputPromises = new uint256[](2);
+        bytes32[] memory inputPromises = new bytes32[](2);
         inputPromises[0] = promise1;
         inputPromises[1] = promise2;
         
         vm.prank(charlie);
-        uint256 promiseAllId = promiseAllContract.create(inputPromises);
+        bytes32 promiseAllId = promiseAllContract.create(inputPromises);
         
         // Resolve only first promise
         vm.prank(alice);
@@ -344,13 +344,13 @@ contract PromiseAllTest is Test {
     function test_singlePromiseAll() public {
         // Test with just one input promise
         vm.prank(alice);
-        uint256 promise1 = promiseContract.create();
+        bytes32 promise1 = promiseContract.create();
         
-        uint256[] memory inputPromises = new uint256[](1);
+        bytes32[] memory inputPromises = new bytes32[](1);
         inputPromises[0] = promise1;
         
         vm.prank(charlie);
-        uint256 promiseAllId = promiseAllContract.create(inputPromises);
+        bytes32 promiseAllId = promiseAllContract.create(inputPromises);
         
         // Resolve the single input promise
         vm.prank(alice);
@@ -373,21 +373,21 @@ contract PromiseAllTest is Test {
     function test_promiseOrderPreserved() public {
         // Create promises and resolve them out of order to test order preservation
         vm.prank(alice);
-        uint256 promise1 = promiseContract.create();
+        bytes32 promise1 = promiseContract.create();
         
         vm.prank(alice);
-        uint256 promise2 = promiseContract.create();
+        bytes32 promise2 = promiseContract.create();
         
         vm.prank(alice);
-        uint256 promise3 = promiseContract.create();
+        bytes32 promise3 = promiseContract.create();
         
-        uint256[] memory inputPromises = new uint256[](3);
+        bytes32[] memory inputPromises = new bytes32[](3);
         inputPromises[0] = promise1;
         inputPromises[1] = promise2;
         inputPromises[2] = promise3;
         
         vm.prank(charlie);
-        uint256 promiseAllId = promiseAllContract.create(inputPromises);
+        bytes32 promiseAllId = promiseAllContract.create(inputPromises);
         
         // Resolve promises out of order: 3, 1, 2
         vm.prank(alice);
@@ -413,13 +413,13 @@ contract PromiseAllTest is Test {
 
     function test_canResolveAfterRejection() public {
         vm.prank(alice);
-        uint256 promise1 = promiseContract.create();
+        bytes32 promise1 = promiseContract.create();
         
-        uint256[] memory inputPromises = new uint256[](1);
+        bytes32[] memory inputPromises = new bytes32[](1);
         inputPromises[0] = promise1;
         
         vm.prank(charlie);
-        uint256 promiseAllId = promiseAllContract.create(inputPromises);
+        bytes32 promiseAllId = promiseAllContract.create(inputPromises);
         
         // Reject the input promise
         vm.prank(alice);
