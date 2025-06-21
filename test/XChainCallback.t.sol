@@ -109,8 +109,8 @@ contract XChainCallbackTest is Test, Relayer {
         assertFalse(callbackB.exists(callbackPromiseId), "Callback should be cleaned up");
     }
 
-    /// @notice Test cross-chain onReject callback
-    function test_CrossChainOnRejectCallback() public {
+    /// @notice Test cross-chain catch callback
+    function test_CrossChainCatchCallback() public {
         vm.selectFork(forkIds[0]);
         
         // Create parent promise on Chain A
@@ -120,10 +120,10 @@ contract XChainCallbackTest is Test, Relayer {
         vm.selectFork(forkIds[1]);
         TestTarget target = new TestTarget();
         
-        // Register cross-chain onReject callback from Chain A to Chain B
+        // Register cross-chain catch callback from Chain A to Chain B
         vm.selectFork(forkIds[0]);
         uint256 chainBId = chainIdByForkId[forkIds[1]];
-        uint256 callbackPromiseId = callbackA.onRejectOn(
+        uint256 callbackPromiseId = callbackA.catchErrorOn(
             chainBId,
             parentPromiseId,
             address(target),
@@ -217,7 +217,7 @@ contract XChainCallbackTest is Test, Relayer {
         callbackA.thenOn(chainAId, parentPromiseId, address(this), this.dummyHandler.selector);
         
         vm.expectRevert("Callback: cannot register callback on same chain");
-        callbackA.onRejectOn(chainAId, parentPromiseId, address(this), this.dummyHandler.selector);
+        callbackA.catchErrorOn(chainAId, parentPromiseId, address(this), this.dummyHandler.selector);
     }
 
     /// @notice Test multiple cross-chain callbacks on same parent promise
@@ -312,8 +312,8 @@ contract XChainCallbackTest is Test, Relayer {
         assertFalse(callbackB.exists(callbackPromiseId), "Callback should be cleaned up");
     }
 
-    /// @notice Test creating onReject callbacks for promises that don't exist locally (remote promises)
-    function test_OnRejectCallbackForRemotePromise() public {
+    /// @notice Test creating catch callbacks for promises that don't exist locally (remote promises)
+    function test_CatchCallbackForRemotePromise() public {
         vm.selectFork(forkIds[0]);
         
         // Create a promise on Chain A
@@ -323,8 +323,8 @@ contract XChainCallbackTest is Test, Relayer {
         vm.selectFork(forkIds[1]);
         TestTarget target = new TestTarget();
         
-        // Create an onReject callback on Chain B for the promise that only exists on Chain A
-        uint256 callbackPromiseId = callbackB.onReject(
+        // Create a catch callback on Chain B for the promise that only exists on Chain A
+        uint256 callbackPromiseId = callbackB.catchError(
             remotePromiseId,
             address(target),
             target.handleError.selector
@@ -373,7 +373,7 @@ contract XChainCallbackTest is Test, Relayer {
         // Create multiple callbacks on Chain B for the same remote promise
         uint256 callback1 = callbackB.then(remotePromiseId, address(target1), target1.handleSuccess.selector);
         uint256 callback2 = callbackB.then(remotePromiseId, address(target2), target2.handleSuccess.selector);
-        uint256 errorCallback = callbackB.onReject(remotePromiseId, address(errorTarget), errorTarget.handleError.selector);
+        uint256 errorCallback = callbackB.catchError(remotePromiseId, address(errorTarget), errorTarget.handleError.selector);
         
         // All callbacks should exist even though parent promise doesn't exist locally
         assertTrue(callbackB.exists(callback1), "Callback 1 should exist");

@@ -6,7 +6,7 @@ import {IResolvable} from "./interfaces/IResolvable.sol";
 import {IL2ToL2CrossDomainMessenger} from "./interfaces/IL2ToL2CrossDomainMessenger.sol";
 
 /// @title Callback
-/// @notice Callback promise contract that implements .then() and .catch() functionality
+/// @notice Callback promise contract that implements .then() and .catchError() functionality
 contract Callback is IResolvable {
     /// @notice The Promise contract instance
     Promise public immutable promiseContract;
@@ -68,12 +68,12 @@ contract Callback is IResolvable {
         emit CallbackRegistered(callbackPromiseId, parentPromiseId, CallbackType.Then);
     }
 
-    /// @notice Create a .catch() callback that executes when the parent promise rejects
+    /// @notice Create a .catchError() callback that executes when the parent promise rejects
     /// @param parentPromiseId The ID of the parent promise to watch
     /// @param target The contract address to call when parent rejects
     /// @param selector The function selector to call
     /// @return callbackPromiseId The ID of the created callback promise
-    function onReject(uint256 parentPromiseId, address target, bytes4 selector) external returns (uint256 callbackPromiseId) {
+    function catchError(uint256 parentPromiseId, address target, bytes4 selector) external returns (uint256 callbackPromiseId) {
         // Create a new promise for this callback
         callbackPromiseId = promiseContract.create();
         
@@ -119,13 +119,13 @@ contract Callback is IResolvable {
         emit CallbackRegistered(callbackPromiseId, parentPromiseId, CallbackType.Then);
     }
 
-    /// @notice Create a cross-chain .catch() callback that executes on another chain when the parent promise rejects
+    /// @notice Create a cross-chain .catchError() callback that executes on another chain when the parent promise rejects
     /// @param destinationChain The chain ID where the callback should execute
     /// @param parentPromiseId The ID of the parent promise to watch
     /// @param target The contract address to call when parent rejects
     /// @param selector The function selector to call
     /// @return callbackPromiseId The ID of the created callback promise
-    function onRejectOn(uint256 destinationChain, uint256 parentPromiseId, address target, bytes4 selector) external returns (uint256 callbackPromiseId) {
+    function catchErrorOn(uint256 destinationChain, uint256 parentPromiseId, address target, bytes4 selector) external returns (uint256 callbackPromiseId) {
         require(address(messenger) != address(0), "Callback: cross-chain not enabled");
         require(destinationChain != currentChainId, "Callback: cannot register callback on same chain");
         

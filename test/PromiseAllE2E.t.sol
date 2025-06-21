@@ -132,7 +132,7 @@ contract PromiseAllE2ETest is Test {
         // Create an error handler callback
         ErrorTarget errorTarget = new ErrorTarget();
         vm.prank(alice);
-        uint256 errorCallback = callbackContract.onReject(promiseAllId, address(errorTarget), errorTarget.handleError.selector);
+        uint256 errorCallback = callbackContract.catchError(promiseAllId, address(errorTarget), errorTarget.handleError.selector);
         
         // Reject the manual promise first (should make PromiseAll resolvable immediately)
         vm.prank(alice);

@@ -15,7 +15,7 @@ This library provides a comprehensive promise-based system for handling asynchro
 
 - **Promise.sol** - Base promise contract managing promise lifecycle, state, and cross-chain sharing
 - **SetTimeout.sol** - Time-based promises that resolve after specified timestamps  
-- **Callback.sol** - Promise chaining with `.then()` and `.catch()` callbacks, including cross-chain callback registration
+- **Callback.sol** - Promise chaining with `.then()` and `.catchError()` callbacks, including cross-chain callback registration
 - **PromiseAll.sol** - Promise aggregation that resolves when all constituent promises succeed
 
 ### Cross-Chain Capabilities
@@ -93,7 +93,7 @@ uint256 crossChainThenId = callbackContract.thenOn(
 );
 
 // Error handling callbacks
-uint256 catchId = callbackContract.onReject(
+uint256 catchId = callbackContract.catchError(
     parentPromiseId,
     targetContract, 
     targetContract.handleError.selector

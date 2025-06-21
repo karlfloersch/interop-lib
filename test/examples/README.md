@@ -50,7 +50,7 @@ The example consists of three main components:
 
 1. `test_CrossChainSwap_Success` - Shows promise chain with successful execution path
 2. `test_CrossChainSwap_FailureAndRollback` - Same promise chain but with failure detection and automatic rollback
-3. `test_PromiseBasedAutomaticRollback` - Shows promise-based error handling with `onReject()` callbacks
+3. `test_PromiseBasedAutomaticRollback` - Shows promise-based error handling with `catchError()` callbacks
 
 **Key Design**: All tests use the same promise chain infrastructure but test different execution branches (success vs failure vs automatic recovery).
 
@@ -133,12 +133,12 @@ uint256 finalSwapCallbackId = callbackA.thenOn(
 
 // CATCH: Register rollback for final swap failures (bridge tokens back)
 console.log("SETUP: Chaining bridge-back for final swap failures");
-uint256 bridgeBackCallbackId = callbackA.onRejectOn(
-    chainIdByForkId[forkIds[1]], // Execute on Chain B
-    finalSwapCallbackId,        // If final swap fails
-    address(this),              // Call back to this contract
-    this.bridgeTokensBack.selector // Bridge tokens back to Chain A
-);
+        uint256 bridgeBackCallbackId = callbackA.catchErrorOn(
+            chainIdByForkId[forkIds[1]], // Execute on Chain B
+            finalSwapCallbackId,        // If final swap fails
+            address(this),              // Call back to this contract
+            this.bridgeTokensBack.selector // Bridge tokens back to Chain A
+        );
 
 vm.stopPrank();
 console.log("PROMISE CHAIN SETUP COMPLETE WITH ROLLBACK HANDLING!");
@@ -148,7 +148,7 @@ console.log("PROMISE CHAIN SETUP COMPLETE WITH ROLLBACK HANDLING!");
 - Step 1: Perform initial swap (Token1 → Token2) 
 - Step 2: Execute bridge operation, get back promise ID
 - Step 3: Chain final swap callback to bridge promise completion
-- Step 4: Register bridge-back callback using `onRejectOn()` for final swap failures
+- Step 4: Register bridge-back callback using `catchErrorOn()` for final swap failures
 - **Result**: Complete workflow with automatic rollback defined before any cross-chain execution
 
 **Rollback Chain Architecture:**
@@ -230,7 +230,7 @@ function executeFinalSwapWithBranching(bytes memory bridgeData) external returns
     // Check if failure mode is enabled (determines success vs failure path)
     if (exchangeB.isFailureModeEnabled(address(token2), address(token3))) {
         console.log("BRANCHING: Failure mode detected - swap will fail");
-        // REVERT to trigger the catch codepath (onRejectOn callback)
+        // REVERT to trigger the catch codepath (catchErrorOn callback)
         revert("Swap failed due to failure mode");
     } else {
         console.log("BRANCHING: Success path - executing swap");
@@ -248,7 +248,7 @@ function executeFinalSwapWithBranching(bytes memory bridgeData) external returns
 }
 ```
 
-**Critical Pattern**: Callbacks that should trigger `onRejectOn()` must **revert**, not return error data.
+**Critical Pattern**: Callbacks that should trigger `catchErrorOn()` must **revert**, not return error data.
 
 ### Automatic Rollback Implementation
 
@@ -318,7 +318,7 @@ exchangeB.setFailureMode(address(token2), address(token3), true); // Enable fail
 
 // IDENTICAL promise chain construction...
 uint256 finalSwapCallbackId = callbackA.thenOn(chainB, bridgePromiseId, address(this), this.executeFinalSwapWithBranching.selector);
-uint256 bridgeBackCallbackId = callbackA.onRejectOn(chainB, finalSwapCallbackId, address(this), this.bridgeTokensBack.selector);
+uint256 bridgeBackCallbackId = callbackA.catchErrorOn(chainB, finalSwapCallbackId, address(this), this.bridgeTokensBack.selector);
 
 // EXECUTION: Same process, different outcome
 relayAllMessages();
@@ -409,8 +409,8 @@ uint256 successCallbackId = callbackA.thenOn(
     this.finalSwap.selector   // Function to call
 );
 
-// Register failure callback (onRejectOn) 
-uint256 failureCallbackId = callbackA.onRejectOn(
+// Register failure callback (catchErrorOn)
+uint256 failureCallbackId = callbackA.catchErrorOn(
     chainB,                   // Execute on same chain as failed callback
     successCallbackId,        // If success callback fails
     address(this),            // Target contract  
@@ -453,7 +453,7 @@ forge test --match-path "test/examples/utils/tests/*.sol" -v
 
 ### Revert-Based Failure Handling
 
-- Callbacks that should trigger `onRejectOn()` must **revert**, not return error data
+- Callbacks that should trigger `catchErrorOn()` must **revert**, not return error data
 - Solidity `revert(string)` uses Error(string) encoding: `0x08c379a0` + ABI-encoded string
 - Rollback functions receive and decode the revert data for debugging/logging
 

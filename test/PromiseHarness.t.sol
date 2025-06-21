@@ -81,7 +81,7 @@ contract PromiseHarnessTest is Test {
         uint256 callback1 = callbackContract.then(parentPromise, address(target), target.handleSuccess.selector);
         
         vm.prank(bob);
-        uint256 callback2 = callbackContract.onReject(parentPromise, address(target), target.handleError.selector);
+        uint256 callback2 = callbackContract.catchError(parentPromise, address(target), target.handleError.selector);
         
         // Check pending count
         uint256 pendingPromises = harness.countPendingAuto();
