@@ -272,6 +272,12 @@ contract Callback is IResolvable {
             }
         }
         
+        // Re-entrancy protection: if currentCallbackRegistrant is not the default value,
+        // this function is being re-entered. Revert to prevent re-entrancy attacks.
+        if (currentCallbackRegistrant != DEFAULT_CALLBACK_REGISTRANT) {
+            revert("Callback: re-entrant call detected");
+        }
+        
         // Set callback context before execution
         currentCallbackRegistrant = callbackData.registrant;
         currentCallbackSourceChain = callbackData.sourceChain;
