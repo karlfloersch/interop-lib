@@ -1,0 +1,14 @@
+{
+  "name": "interop-lib-deployment-scripts",
+  "version": "1.0.0",
+  "description": "Deployment scripts for interop-lib contracts",
+  "type": "module",
+  "scripts": {
+    "deploy": "node deploy.js"
+  },
+  "keywords": ["deployment", "contracts", "superchain", "interop"],
+  "license": "MIT",
+  "dependencies": {
+    "@superchain/js": "^0.0.16"
+  }
+}
