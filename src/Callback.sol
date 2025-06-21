@@ -17,6 +17,15 @@ contract Callback is IResolvable {
     /// @notice Current chain ID for generating global promise IDs (optional)
     uint256 public immutable currentChainId;
 
+    /// @notice Default callback registrant when no callback is being executed
+    address internal constant DEFAULT_CALLBACK_REGISTRANT = address(0);
+
+    /// @notice Current callback context - who registered the currently executing callback
+    address internal currentCallbackRegistrant;
+    
+    /// @notice Current callback context - which chain the currently executing callback was registered from
+    uint256 internal currentCallbackSourceChain;
+
     /// @notice Callback types for handling different promise states
     enum CallbackType {
         Then,   // Executes when parent promise resolves
@@ -194,6 +203,40 @@ contract Callback is IResolvable {
         emit CallbackRegistered(callbackPromiseId, parentPromiseId, CallbackType(callbackType));
     }
 
+    /// @notice Get the registrant of the currently executing callback
+    /// @dev Will revert if no callback is currently being executed
+    /// @return The address that registered the currently executing callback
+    function callbackRegistrant() external view returns (address) {
+        require(
+            currentCallbackRegistrant != DEFAULT_CALLBACK_REGISTRANT, 
+            "Callback: no callback currently executing"
+        );
+        return currentCallbackRegistrant;
+    }
+
+    /// @notice Get the source chain of the currently executing callback  
+    /// @dev Will revert if no callback is currently being executed
+    /// @return The chain ID where the currently executing callback was registered
+    function callbackSourceChain() external view returns (uint256) {
+        require(
+            currentCallbackRegistrant != DEFAULT_CALLBACK_REGISTRANT,
+            "Callback: no callback currently executing" 
+        );
+        return currentCallbackSourceChain;
+    }
+
+    /// @notice Get the full context of the currently executing callback
+    /// @dev Will revert if no callback is currently being executed
+    /// @return registrant The address that registered the currently executing callback
+    /// @return sourceChain The chain ID where the currently executing callback was registered
+    function callbackContext() external view returns (address registrant, uint256 sourceChain) {
+        require(
+            currentCallbackRegistrant != DEFAULT_CALLBACK_REGISTRANT,
+            "Callback: no callback currently executing"
+        );
+        return (currentCallbackRegistrant, currentCallbackSourceChain);
+    }
+
     /// @notice Resolve a callback promise by executing the callback if conditions are met
     /// @param callbackPromiseId The ID of the callback promise to resolve
     function resolve(uint256 callbackPromiseId) external {
@@ -229,10 +272,18 @@ contract Callback is IResolvable {
             }
         }
         
+        // Set callback context before execution
+        currentCallbackRegistrant = callbackData.registrant;
+        currentCallbackSourceChain = callbackData.sourceChain;
+        
         // Execute the callback
         (bool success, bytes memory returnData) = callbackData.target.call(
             abi.encodeWithSelector(callbackData.selector, parentPromise.returnData)
         );
+        
+        // Clear callback context after execution
+        currentCallbackRegistrant = DEFAULT_CALLBACK_REGISTRANT;
+        currentCallbackSourceChain = 0;
         
         if (success) {
             // Resolve the callback promise with the return value from the callback
