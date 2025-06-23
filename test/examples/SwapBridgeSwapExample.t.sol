@@ -13,10 +13,10 @@ import {MockSuperchainERC20} from "./utils/MockSuperchainERC20.sol";
 import {MockExchange} from "./utils/MockExchange.sol";
 import {PromiseBridge} from "./utils/PromiseBridge.sol";
 
-/// @title CrossChainSwapExample
+/// @title SwapBridgeSwapExample
 /// @notice E2E test demonstrating cross-chain swap workflow using promise library
 /// @dev Flow: (Chain A) swap -> bridge(burn) -> (Chain B) bridge(mint) -> swap
-contract CrossChainSwapExampleTest is Test, Relayer {
+contract SwapBridgeSwapExampleTest is Test, Relayer {
     // Promise system contracts (deployed on both chains)
     Promise public promiseA;
     Promise public promiseB;
