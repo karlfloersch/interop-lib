@@ -264,10 +264,10 @@ contract Callback is IResolvable {
                 revert("Callback: parent promise not settled");
             } else {
                 // Parent is settled but doesn't match callback type, reject this callback
-                promiseContract.reject(callbackPromiseId, abi.encode("Callback not applicable"));
+                promiseContract.reject(callbackPromiseId, parentPromise.returnData);
                 // Clean up storage
                 delete callbacks[callbackPromiseId];
-                emit CallbackExecuted(callbackPromiseId, false, abi.encode("Callback not applicable"));
+                emit CallbackExecuted(callbackPromiseId, false, parentPromise.returnData);
                 return;
             }
         }
