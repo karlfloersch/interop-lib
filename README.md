@@ -28,6 +28,7 @@ The Twin system gives users a single deterministic address (`msg.sender`) that i
 - **TwinFactory.sol** - CREATE2 factory for deterministic twin deployment. Same factory address on all chains → same twin address everywhere. The router is set once by the factory owner.
 - **TwinRouter.sol** - User entry point. Deploys the user's twin (if needed), optionally credits `msg.value` into that twin's callback gas tank, and delegatecalls a script into it.
 - **TwinChain.sol** - Fluent builder routed through a Twin. Supports normal callbacks and delegatecall callback scripts.
+- **CallbackGasTank.sol** - Native ETH balance store used by callback scripts to pay the relayer that resolves a callback.
 - **IScript.sol** - Interface for script contracts that run inside a Twin via delegatecall.
 
 ### Cross-Chain Capabilities
@@ -214,6 +215,58 @@ TwinRouter(router).execute{value: 0.05 ether}(address(myScript));
 ```
 
 `msg.value` on `TwinRouter.execute(...)` is treated as script gas budget. The router deposits it into the executing twin's `CallbackGasTank` balance, and later callback scripts can pay the current resolver from inside the twin with `CallbackGasTank.payCurrentResolver(...)`.
+
+### Funding Callback Gas From The Router
+
+The important detail is that the gas tank is keyed by the twin, not by the EOA.
+
+```solidity
+TwinRouter(router).execute{value: 0.05 ether}(address(script));
+```
+
+That does three things:
+
+1. deploys or fetches the caller's twin
+2. deposits `0.05 ether` into `CallbackGasTank.balanceOf(twin)`
+3. delegatecalls the script inside that twin
+
+That matters because callback scripts are registered and executed as the twin. During callback execution:
+
+- `callbackRegistrant()` is the twin
+- `callbackResolver()` is the relayer or contract that called `Callback.resolve(...)`
+
+So a callback script can pay the current resolver directly:
+
+```solidity
+contract GasPayingThenScript {
+    CallbackGasTank public immutable gasTank;
+    Target public immutable target;
+    uint256 public immutable payout;
+
+    constructor(CallbackGasTank _gasTank, Target _target, uint256 _payout) {
+        gasTank = _gasTank;
+        target = _target;
+        payout = _payout;
+    }
+
+    function run(bytes memory parentReturnData) external {
+        Twin twin = Twin(address(this));
+        uint256 value = abi.decode(parentReturnData, (uint256));
+
+        twin.execute(
+            address(gasTank),
+            abi.encodeCall(CallbackGasTank.payCurrentResolver, (payout))
+        );
+
+        twin.execute(
+            address(target),
+            abi.encodeCall(target.doSomething, (value + 1))
+        );
+    }
+}
+```
+
+This is the intended pattern when a script wants to reimburse the relayer automatically as part of the promise chain itself.
 
 **Direct usage (without Router/Script):**
 
