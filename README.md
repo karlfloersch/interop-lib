@@ -285,6 +285,8 @@ This is the pattern to use when a callback needs to continue the promise chain a
 
 The isolated Twin-based example lives in `test/examples/TwinSwapBridgeSwapExample.t.sol`.
 
+For a full walkthrough, see `TUTORIAL.md`.
+
 Success path:
 
 1. On chain A, the twin swaps `tokenA -> tokenB`
