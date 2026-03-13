@@ -12,6 +12,7 @@ import {TwinChain} from "../../src/TwinChain.sol";
 import {TwinFactory} from "../../src/TwinFactory.sol";
 import {TwinRouter} from "../../src/TwinRouter.sol";
 import {IScript} from "../../src/interfaces/IScript.sol";
+import {CallbackGasTank} from "../../src/CallbackGasTank.sol";
 import {PredeployAddresses} from "../../src/libraries/PredeployAddresses.sol";
 
 import {MockSuperchainERC20} from "./utils/MockSuperchainERC20.sol";
@@ -28,6 +29,8 @@ contract TwinSwapBridgeSwapExampleTest is Test, Relayer {
     TwinFactory public factoryA;
     TwinFactory public factoryB;
     TwinRouter public routerA;
+    CallbackGasTank public gasTankA;
+    CallbackGasTank public gasTankB;
 
     MockExchange public exchangeA;
     MockExchange public exchangeB;
@@ -155,6 +158,7 @@ contract TwinSwapBridgeSwapExampleTest is Test, Relayer {
             address(promiseA),
             PredeployAddresses.L2_TO_L2_CROSS_DOMAIN_MESSENGER
         );
+        gasTankA = new CallbackGasTank{salt: bytes32(uint256(9))}(address(callbackA));
 
         vm.selectFork(forkIds[1]);
         promiseB = new Promise{salt: bytes32(0)}(
@@ -169,16 +173,18 @@ contract TwinSwapBridgeSwapExampleTest is Test, Relayer {
             address(promiseB),
             PredeployAddresses.L2_TO_L2_CROSS_DOMAIN_MESSENGER
         );
+        gasTankB = new CallbackGasTank{salt: bytes32(uint256(9))}(address(callbackB));
 
         require(address(promiseA) == address(promiseB), "promise addresses differ");
         require(address(callbackA) == address(callbackB), "callback addresses differ");
         require(address(factoryA) == address(factoryB), "factory addresses differ");
+        require(address(gasTankA) == address(gasTankB), "gas tank addresses differ");
 
         chainAId = chainIdByForkId[forkIds[0]];
         chainBId = chainIdByForkId[forkIds[1]];
 
         vm.selectFork(forkIds[0]);
-        routerA = new TwinRouter(address(factoryA));
+        routerA = new TwinRouter(address(factoryA), address(gasTankA));
         factoryA.setRouter(address(routerA));
         aliceTwinA = Twin(factoryA.getOrDeployTwin(alice));
 

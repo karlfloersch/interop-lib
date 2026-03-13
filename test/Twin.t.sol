@@ -9,6 +9,7 @@ import {TwinChain} from "../src/TwinChain.sol";
 import {TwinFactory} from "../src/TwinFactory.sol";
 import {TwinRouter} from "../src/TwinRouter.sol";
 import {IScript} from "../src/interfaces/IScript.sol";
+import {CallbackGasTank} from "../src/CallbackGasTank.sol";
 
 contract TwinTest is Test {
     using TwinChain for TwinChain.Chain;
@@ -17,6 +18,7 @@ contract TwinTest is Test {
     Callback public callbackContract;
     TwinFactory public factory;
     TwinRouter public router;
+    CallbackGasTank public gasTank;
 
     address public alice = address(0x1);
     address public bob = address(0x2);
@@ -28,7 +30,8 @@ contract TwinTest is Test {
         factory = new TwinFactory(
             address(callbackContract), address(promiseContract), address(0)
         );
-        router = new TwinRouter(address(factory));
+        gasTank = new CallbackGasTank(address(callbackContract));
+        router = new TwinRouter(address(factory), address(gasTank));
         factory.setRouter(address(router));
 
         // Deploy alice's twin
@@ -212,6 +215,33 @@ contract TwinTest is Test {
         assertTrue(nestedTarget.called());
         assertEq(nestedTarget.lastCaller(), address(aliceTwin));
         assertEq(nestedTarget.lastValue(), 43);
+    }
+
+    function test_thenScriptCanPayResolverFromGasTank() public {
+        TwinTarget target = new TwinTarget();
+        TwinTarget parentTarget = new TwinTarget();
+        GasPayingThenScript callbackScript = new GasPayingThenScript(gasTank, target, 0.1 ether);
+        RouterGasPayingScript script =
+            new RouterGasPayingScript(parentTarget, callbackScript);
+        ResolverReceiver resolver = new ResolverReceiver();
+
+        vm.deal(alice, 1 ether);
+
+        vm.prank(alice);
+        router.execute{value: 0.5 ether}(address(script));
+
+        bytes32 cbPromiseId = promiseContract.generatePromiseId(bytes32(uint256(2)));
+
+        resolver.resolveCallback(callbackContract, cbPromiseId);
+
+        assertEq(resolver.totalReceived(), 0.1 ether, "Resolver should receive payout");
+        assertEq(gasTank.balanceOf(address(aliceTwin)), 0.4 ether, "Twin gas balance should decrease");
+        assertEq(gasTank.lastPaidRelayer(), address(resolver), "Resolver should be identified as relayer");
+        assertEq(gasTank.lastPaidGasProvider(), address(aliceTwin), "Twin should fund payout");
+        assertEq(gasTank.lastPaidAmount(), 0.1 ether, "Payout amount should be recorded");
+        assertTrue(target.called(), "Script should continue after paying resolver");
+        assertEq(target.lastCaller(), address(aliceTwin), "Nested call should still come from twin");
+        assertEq(target.lastValue(), 19, "Script should still process parent result");
     }
 
     // ─── Auth ──────────────────────────────────────────────────────────
@@ -471,5 +501,63 @@ contract ThenScript {
             address(target),
             abi.encodeCall(target.doSomething, (value + 1))
         );
+    }
+}
+
+contract GasPayingThenScript {
+    CallbackGasTank public immutable gasTank;
+    TwinTarget public immutable target;
+    uint256 public immutable payout;
+
+    constructor(CallbackGasTank _gasTank, TwinTarget _target, uint256 _payout) {
+        gasTank = _gasTank;
+        target = _target;
+        payout = _payout;
+    }
+
+    function run(bytes memory parentReturnData) external {
+        Twin twin = Twin(address(this));
+        uint256 value = abi.decode(parentReturnData, (uint256));
+
+        twin.execute(
+            address(gasTank),
+            abi.encodeCall(CallbackGasTank.payCurrentResolver, (payout))
+        );
+
+        twin.execute(
+            address(target),
+            abi.encodeCall(target.doSomething, (value + 1))
+        );
+    }
+}
+
+contract RouterGasPayingScript is IScript {
+    using TwinChain for TwinChain.Chain;
+
+    TwinTarget public immutable parentTarget;
+    GasPayingThenScript public immutable callbackScript;
+
+    constructor(TwinTarget _parentTarget, GasPayingThenScript _callbackScript) {
+        parentTarget = _parentTarget;
+        callbackScript = _callbackScript;
+    }
+
+    function run() external {
+        Twin twin = Twin(address(this));
+        twin.makeCall(address(parentTarget), abi.encodeCall(parentTarget.doSomething, (9)))
+            .thenScript(address(callbackScript), GasPayingThenScript.run.selector)
+            .build();
+    }
+}
+
+contract ResolverReceiver {
+    uint256 public totalReceived;
+
+    receive() external payable {
+        totalReceived += msg.value;
+    }
+
+    function resolveCallback(Callback callbackContract, bytes32 callbackPromiseId) external {
+        callbackContract.resolve(callbackPromiseId);
     }
 }

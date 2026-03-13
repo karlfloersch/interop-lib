@@ -9,6 +9,8 @@ It covers two paths:
 
 The example is built around the Twin system, so every externally visible action happens with `msg.sender == twin`.
 
+If you call `TwinRouter.execute{value: ...}(script)`, that native value is also deposited into the executing twin's callback gas tank. That lets later callback scripts pay the relayer from inside the script flow instead of pre-wiring a separate payment transaction.
+
 ## Why This Example Exists
 
 The simple Twin flow is easy:
@@ -195,13 +197,14 @@ This matches `test_swapBridgeSwap_success()`.
 Alice calls:
 
 ```solidity
-routerA.execute(address(initScriptA));
+routerA.execute{value: gasBudget}(address(initScriptA));
 ```
 
 The router:
 
 1. finds or deploys Alice's twin
-2. delegatecalls the init script into the twin
+2. credits the twin's callback gas tank with `gasBudget`
+3. delegatecalls the init script into the twin
 
 The init script:
 

@@ -11,6 +11,7 @@ import {TwinChain} from "../src/TwinChain.sol";
 import {TwinFactory} from "../src/TwinFactory.sol";
 import {TwinRouter} from "../src/TwinRouter.sol";
 import {IScript} from "../src/interfaces/IScript.sol";
+import {CallbackGasTank} from "../src/CallbackGasTank.sol";
 import {PredeployAddresses} from "../src/libraries/PredeployAddresses.sol";
 
 /// @title XChainTwinTest
@@ -25,8 +26,11 @@ contract XChainTwinTest is Test, Relayer {
     TwinFactory public factoryA;
     TwinFactory public factoryB;
     TwinRouter public routerA;
+    CallbackGasTank public gasTankA;
+    CallbackGasTank public gasTankB;
 
     address public alice = address(0x1);
+    address public relayer = address(0xB0B);
     Twin public aliceTwinA;
     Twin public aliceTwinB;
 
@@ -51,6 +55,7 @@ contract XChainTwinTest is Test, Relayer {
             address(callbackA), address(promiseA),
             PredeployAddresses.L2_TO_L2_CROSS_DOMAIN_MESSENGER
         );
+        gasTankA = new CallbackGasTank{salt: bytes32(uint256(1))}(address(callbackA));
 
         vm.selectFork(forkIds[1]);
         promiseB = new Promise{salt: bytes32(0)}(
@@ -64,15 +69,17 @@ contract XChainTwinTest is Test, Relayer {
             address(callbackB), address(promiseB),
             PredeployAddresses.L2_TO_L2_CROSS_DOMAIN_MESSENGER
         );
+        gasTankB = new CallbackGasTank{salt: bytes32(uint256(1))}(address(callbackB));
 
         // Verify same addresses
         require(address(promiseA) == address(promiseB), "Promise addresses differ");
         require(address(callbackA) == address(callbackB), "Callback addresses differ");
         require(address(factoryA) == address(factoryB), "Factory addresses differ");
+        require(address(gasTankA) == address(gasTankB), "Gas tank addresses differ");
 
         // Deploy Router on Chain A and wire it up
         vm.selectFork(forkIds[0]);
-        routerA = new TwinRouter(address(factoryA));
+        routerA = new TwinRouter(address(factoryA), address(gasTankA));
         factoryA.setRouter(address(routerA));
 
         // Deploy alice's twin on both chains
@@ -297,6 +304,65 @@ contract XChainTwinTest is Test, Relayer {
         assertTrue(nestedTargetB.called(), "Nested target should have been called");
         assertEq(nestedTargetB.lastCaller(), address(aliceTwinB), "Nested call should come from twin");
         assertEq(nestedTargetB.lastValue(), 66, "Script should decode and reuse the parent result");
+    }
+
+    function test_thenScriptOnCanPayDestinationResolver() public {
+        vm.selectFork(forkIds[0]);
+        XChainTarget parentTarget = new XChainTarget{salt: bytes32(uint256(21))}();
+        XChainTarget nestedTargetA = new XChainTarget{salt: bytes32(uint256(22))}();
+        GasPayingXChainThenScript callbackScriptA = new GasPayingXChainThenScript{
+            salt: bytes32(uint256(23))
+        }(gasTankA, nestedTargetA, 0.08 ether);
+
+        vm.selectFork(forkIds[1]);
+        XChainTarget nestedTargetB = new XChainTarget{salt: bytes32(uint256(22))}();
+        ResolverReceiverXChain resolver = new ResolverReceiverXChain();
+        GasPayingXChainThenScript callbackScriptB = new GasPayingXChainThenScript{
+            salt: bytes32(uint256(23))
+        }(gasTankB, nestedTargetB, 0.08 ether);
+
+        require(address(callbackScriptA) == address(callbackScriptB), "Script addresses differ");
+        require(address(nestedTargetA) == address(nestedTargetB), "Target addresses differ");
+
+        vm.selectFork(forkIds[1]);
+        vm.deal(alice, 1 ether);
+        vm.prank(alice);
+        gasTankB.deposit{value: 0.3 ether}(address(aliceTwinB));
+
+        vm.selectFork(forkIds[0]);
+        uint256 chainBId = chainIdByForkId[forkIds[1]];
+
+        vm.prank(alice);
+        TwinChain.Chain memory chain = aliceTwinA.makeCall(
+            address(parentTarget),
+            abi.encodeCall(parentTarget.doSomething, (5))
+        );
+
+        vm.prank(alice);
+        bytes32 cbPromiseId = aliceTwinA.thenScriptOn(
+            chainBId,
+            chain.currentPromiseId,
+            address(callbackScriptA),
+            callbackScriptA.run.selector
+        );
+
+        relayAllMessages();
+
+        vm.selectFork(forkIds[0]);
+        promiseA.shareResolvedPromise(chainBId, chain.currentPromiseId);
+        relayAllMessages();
+
+        vm.selectFork(forkIds[1]);
+        resolver.resolveCallback(callbackB, cbPromiseId);
+
+        assertEq(resolver.totalReceived(), 0.08 ether, "Destination resolver should receive payout");
+        assertEq(gasTankB.balanceOf(address(aliceTwinB)), 0.22 ether, "Destination twin gas balance should decrease");
+        assertEq(gasTankB.lastPaidRelayer(), address(resolver), "Destination resolver should be recorded");
+        assertEq(gasTankB.lastPaidGasProvider(), address(aliceTwinB), "Destination twin should fund payout");
+        assertEq(gasTankB.lastPaidAmount(), 0.08 ether, "Payout amount should be recorded");
+        assertTrue(nestedTargetB.called(), "Script should continue after paying resolver");
+        assertEq(nestedTargetB.lastCaller(), address(aliceTwinB), "Nested call should come from twin");
+        assertEq(nestedTargetB.lastValue(), 10, "Script should still process the parent result");
     }
 
     /// @notice catchErrorOn works cross-chain
@@ -590,5 +656,44 @@ contract XChainThenScript {
             address(target),
             abi.encodeCall(target.doSomething, (value))
         );
+    }
+}
+
+contract GasPayingXChainThenScript {
+    CallbackGasTank public immutable gasTank;
+    XChainTarget public immutable target;
+    uint256 public immutable payout;
+
+    constructor(CallbackGasTank _gasTank, XChainTarget _target, uint256 _payout) {
+        gasTank = _gasTank;
+        target = _target;
+        payout = _payout;
+    }
+
+    function run(bytes memory parentReturnData) external {
+        Twin twin = Twin(address(this));
+        uint256 value = abi.decode(parentReturnData, (uint256));
+
+        twin.execute(
+            address(gasTank),
+            abi.encodeCall(CallbackGasTank.payCurrentResolver, (payout))
+        );
+
+        twin.execute(
+            address(target),
+            abi.encodeCall(target.doSomething, (value))
+        );
+    }
+}
+
+contract ResolverReceiverXChain {
+    uint256 public totalReceived;
+
+    receive() external payable {
+        totalReceived += msg.value;
+    }
+
+    function resolveCallback(Callback callbackContract, bytes32 callbackPromiseId) external {
+        callbackContract.resolve(callbackPromiseId);
     }
 }

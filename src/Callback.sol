@@ -29,6 +29,9 @@ contract Callback is IResolvable {
     /// @notice Current callback context - the promise ID of the currently executing callback
     bytes32 internal currentCallbackPromiseId;
 
+    /// @notice Current callback context - who is executing the callback resolution transaction
+    address internal currentCallbackResolver;
+
     /// @notice Callback types for handling different promise states
     enum CallbackType {
         Then,   // Executes when parent promise resolves
@@ -251,6 +254,17 @@ contract Callback is IResolvable {
         return currentCallbackPromiseId;
     }
 
+    /// @notice Get the resolver of the currently executing callback
+    /// @dev Will revert if no callback is currently being executed
+    /// @return The address currently resolving the callback
+    function callbackResolver() external view returns (address) {
+        require(
+            currentCallbackRegistrant != DEFAULT_CALLBACK_REGISTRANT,
+            "Callback: no callback currently executing"
+        );
+        return currentCallbackResolver;
+    }
+
     /// @notice Resolve a callback promise by executing the callback if conditions are met
     /// @param callbackPromiseId The ID of the callback promise to resolve
     function resolve(bytes32 callbackPromiseId) external {
@@ -296,6 +310,7 @@ contract Callback is IResolvable {
         currentCallbackRegistrant = callbackData.registrant;
         currentCallbackSourceChain = callbackData.sourceChain;
         currentCallbackPromiseId = callbackPromiseId;
+        currentCallbackResolver = msg.sender;
         
         // Execute the callback
         (bool success, bytes memory returnData) = callbackData.target.call(
@@ -306,6 +321,7 @@ contract Callback is IResolvable {
         currentCallbackRegistrant = DEFAULT_CALLBACK_REGISTRANT;
         currentCallbackSourceChain = 0;
         currentCallbackPromiseId = bytes32(0);
+        currentCallbackResolver = address(0);
         
         if (success) {
             // Resolve the callback promise with the return value from the callback

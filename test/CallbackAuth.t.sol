@@ -56,7 +56,13 @@ contract CallbackAuthTest is Test {
         // Verify the target received the correct context
         assertEq(contextTarget.lastRegistrant(), bob, "Target should know callback was registered by bob");
         assertEq(contextTarget.lastSourceChain(), block.chainid, "Target should know callback was registered on current chain");
+        assertEq(contextTarget.lastResolver(), address(this), "Target should know who resolved the callback");
         assertTrue(contextTarget.contextWasAvailable(), "Context should have been available during execution");
+    }
+
+    function test_callbackResolverNotAvailableOutsideExecution() public {
+        vm.expectRevert("Callback: no callback currently executing");
+        callbackContract.callbackResolver();
     }
 
     function test_callbackContextNotAvailableOutsideExecution() public {
@@ -293,6 +299,7 @@ contract ContextAwareTarget {
     address public callbackContract;
     address public lastRegistrant;
     uint256 public lastSourceChain;
+    address public lastResolver;
     bool public contextWasAvailable;
     
     constructor(address _callbackContract) {
@@ -304,6 +311,7 @@ contract ContextAwareTarget {
         try Callback(callbackContract).callbackContext() returns (address registrant, uint256 sourceChain) {
             lastRegistrant = registrant;
             lastSourceChain = sourceChain;
+            lastResolver = Callback(callbackContract).callbackResolver();
             contextWasAvailable = true;
         } catch {
             contextWasAvailable = false;

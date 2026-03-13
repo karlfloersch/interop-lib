@@ -26,7 +26,7 @@ The Twin system gives users a single deterministic address (`msg.sender`) that i
 
 - **Twin.sol** - User's cross-chain agent. Wraps Callback to route calls through the twin so targets always see `msg.sender == twin`. Supports `makeCall` (local), `makeCallOn` (cross-chain), `.then()`, `.thenOn()`, `.catchError()`, `.catchErrorOn()`, callback scripts (`.thenScript*` / `.catchErrorScript*`), and direct `execute`.
 - **TwinFactory.sol** - CREATE2 factory for deterministic twin deployment. Same factory address on all chains → same twin address everywhere. The router is set once by the factory owner.
-- **TwinRouter.sol** - User entry point. Deploys the user's twin (if needed) and delegatecalls a script into it.
+- **TwinRouter.sol** - User entry point. Deploys the user's twin (if needed), optionally credits `msg.value` into that twin's callback gas tank, and delegatecalls a script into it.
 - **TwinChain.sol** - Fluent builder routed through a Twin. Supports normal callbacks and delegatecall callback scripts.
 - **IScript.sol** - Interface for script contracts that run inside a Twin via delegatecall.
 
@@ -206,11 +206,14 @@ contract SwapAndDeposit is IScript {
 }
 
 // 2. Execute it — one transaction does everything
-TwinRouter(router).execute(address(myScript));
+TwinRouter(router).execute{value: 0.05 ether}(address(myScript));
 // → Router deploys twin if needed
+// → Router credits the twin's gas tank with the attached ETH
 // → Twin delegatecalls script.run()
 // → Script sets up full promise chain as the twin
 ```
+
+`msg.value` on `TwinRouter.execute(...)` is treated as script gas budget. The router deposits it into the executing twin's `CallbackGasTank` balance, and later callback scripts can pay the current resolver from inside the twin with `CallbackGasTank.payCurrentResolver(...)`.
 
 **Direct usage (without Router/Script):**
 
