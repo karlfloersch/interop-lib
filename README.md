@@ -17,6 +17,8 @@ This library provides a comprehensive promise-based system for handling asynchro
 - **SetTimeout.sol** - Time-based promises that resolve after specified timestamps  
 - **Callback.sol** - Promise chaining with `.then()` and `.catchError()` callbacks, including cross-chain callback registration
 - **PromiseAll.sol** - Promise aggregation that resolves when all constituent promises succeed
+- **PromiseChain.sol** - Fluent builder for JS-like promise chaining syntax (`.from().then().catchError().build()`)
+- **PromiseUtils.sol** - Variadic helpers for `PromiseAll` (avoid manual array construction)
 
 ### Cross-Chain Capabilities
 
@@ -79,8 +81,8 @@ if (setTimeoutContract.canResolve(timeoutId)) {
 ```solidity
 // Local callback registration
 uint256 thenId = callbackContract.then(
-    parentPromiseId, 
-    targetContract, 
+    parentPromiseId,
+    targetContract,
     targetContract.handleSuccess.selector
 );
 
@@ -95,9 +97,64 @@ uint256 crossChainThenId = callbackContract.thenOn(
 // Error handling callbacks
 uint256 catchId = callbackContract.catchError(
     parentPromiseId,
-    targetContract, 
+    targetContract,
     targetContract.handleError.selector
 );
+```
+
+### Fluent Promise Chaining (PromiseChain)
+
+For complex chains, `PromiseChain` provides a fluent builder API that mirrors JavaScript promise syntax — no manual nesting of callback calls required:
+
+```solidity
+import {PromiseChain} from "./PromiseChain.sol";
+
+// Instead of manually nesting callback.then(callback.then(...)):
+bytes32 finalId = PromiseChain
+    .from(callback, initialPromise)
+    .then(target1, target1.onSuccess.selector)
+    .thenOn(chainB, target2, target2.handleRemote.selector)
+    .catchError(errorHandler, errorHandler.onError.selector)
+    .build();
+```
+
+**API:**
+
+| Method | Description |
+|--------|-------------|
+| `from(cb, promiseId)` | Start a chain from an existing promise |
+| `.then(target, selector)` | Success callback on the same chain |
+| `.thenOn(destChain, target, selector)` | Success callback on a different chain |
+| `.catchError(target, selector)` | Error callback on the same chain |
+| `.catchErrorOn(destChain, target, selector)` | Error callback on a different chain |
+| `.fork()` | Branch the chain — both branches start from the same promise |
+| `.build()` / `.current()` | Extract the final promise ID |
+
+**Forking** lets you attach parallel handlers to the same promise:
+
+```solidity
+PromiseChain.Chain memory chain = PromiseChain.from(callback, promise);
+
+// Fork for error handling on a separate branch
+PromiseChain.Chain memory errorBranch = chain.fork();
+errorBranch.catchError(fallback, fallback.onError.selector).build();
+
+// Continue the success path
+bytes32 resultId = chain
+    .then(processor, processor.process.selector)
+    .thenOn(chainB, sink, sink.store.selector)
+    .build();
+```
+
+`PromiseUtils` also provides variadic `all()` helpers so you don't need to manually construct arrays for `PromiseAll`:
+
+```solidity
+import {PromiseUtils} from "./PromiseUtils.sol";
+
+// Instead of building a uint256[] array:
+bytes32 allId = PromiseUtils.all(promiseAll, p1, p2);
+bytes32 allId = PromiseUtils.all(promiseAll, p1, p2, p3);
+bytes32 allId = PromiseUtils.all(promiseAll, p1, p2, p3, p4);
 ```
 
 ### Remote Promise Callbacks
