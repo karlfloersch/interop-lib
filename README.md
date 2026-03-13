@@ -244,6 +244,33 @@ twin.makeCall(exchange, abi.encodeCall(exchange.swap, (tokenA, tokenB, amountIn)
    - `target.call(...)` for normal callbacks, so the target sees `msg.sender == twin`
    - `script.delegatecall(...)` for callback scripts, so the script can keep executing as the twin
 
+```mermaid
+sequenceDiagram
+    participant User
+    participant Router as TwinRouter (Chain A)
+    participant TwinA as Twin (Chain A)
+    participant TwinB as Twin (Chain B)
+    participant PromiseA as Promise (Chain A)
+    participant CallbackA as Callback (Chain A)
+    participant DexB as DEX (Chain B)
+    participant HandlerA as Handler/Script (Chain A)
+
+    User->>Router: execute(script)
+    Router->>TwinA: executeScript(script)
+    TwinA->>PromiseA: create() => P1
+    TwinA->>TwinB: receiveCall(P1, dex, data)
+    TwinA->>CallbackA: then(P1, twin, executeCallback)
+    TwinB->>DexB: swap(...) as twin
+    DexB-->>TwinB: returnData
+    TwinB->>PromiseA: shareResolvedPromise(P1) back to chain A
+    CallbackA->>TwinA: executeCallback(parentReturnData)
+    alt normal callback
+        TwinA->>HandlerA: target.call(...)
+    else callback script
+        TwinA->>HandlerA: script.delegatecall(...)
+    end
+```
+
 ### Twin Callback Scripts
 
 Callback scripts solve the main gap in multi-step workflows: a callback often needs to do more than just forward data to a target. It may need to approve tokens, start a bridge, register another callback, or create a rollback branch.
@@ -317,6 +344,30 @@ twin.makeCall(exchange, abi.encodeCall(MockExchange.swap, (tokenB, tokenC, amoun
 ```
 
 Important behavior: callback branches only enter the error path when the callback actually reverts. Returning `false` is still a successful resolution from the promise system's perspective.
+
+```mermaid
+flowchart LR
+    A["Chain A Twin\nswap tokenA -> tokenB"] --> B["AfterLocalSwapScript\napprove + bridge tokenB"]
+    B --> C["Chain B bridge mint callback\nmint tokenB to twin"]
+    C --> D["DestinationSwapScript\nswap tokenB -> tokenC"]
+
+    D -->|success| E["Chain B Twin holds tokenC"]
+    D -->|revert| F["catchErrorScript rollback branch"]
+    F --> G["RollbackBridgeBackScript\nbridge tokenB back to chain A"]
+    G --> H["Chain A bridge-back mint callback"]
+    H --> I["Chain A Twin holds tokenB again"]
+```
+
+```mermaid
+flowchart TD
+    P1["P1: local swap promise"] --> C1["thenScript(afterLocalSwap)"]
+    C1 --> P2["bridge mint callback promise on chain B"]
+    P2 --> C2["thenScriptOn(destinationSwap)"]
+    C2 --> P3["P3: destination swap promise"]
+    P3 -->|resolved| S["success path"]
+    P3 -->|rejected| R["catchErrorScript(rollbackBridgeBack)"]
+    R --> P4["bridge-back mint callback promise on chain A"]
+```
 
 ### Remote Promise Callbacks
 
