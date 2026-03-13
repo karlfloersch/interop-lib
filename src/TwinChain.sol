@@ -46,6 +46,24 @@ library TwinChain {
         return self;
     }
 
+    /// @notice Add a .thenScript() callback executed via delegatecall in the twin.
+    /// @param self The current chain state
+    /// @param script The script contract address to delegatecall
+    /// @param selector The script selector to invoke
+    /// @return The updated chain with new promise ID
+    function thenScript(
+        Chain memory self,
+        address script,
+        bytes4 selector
+    ) internal returns (Chain memory) {
+        self.currentPromiseId = self.twin.thenScript(
+            self.currentPromiseId,
+            script,
+            selector
+        );
+        return self;
+    }
+
     /// @notice Add a .then() callback on a destination chain
     /// @param self The current chain state
     /// @param destChain The destination chain ID
@@ -62,6 +80,27 @@ library TwinChain {
             destChain,
             self.currentPromiseId,
             target,
+            selector
+        );
+        return self;
+    }
+
+    /// @notice Add a .thenScriptOn() callback executed via delegatecall in the twin.
+    /// @param self The current chain state
+    /// @param destChain The destination chain ID
+    /// @param script The script contract address to delegatecall
+    /// @param selector The script selector to invoke
+    /// @return The updated chain with new promise ID
+    function thenScriptOn(
+        Chain memory self,
+        uint256 destChain,
+        address script,
+        bytes4 selector
+    ) internal returns (Chain memory) {
+        self.currentPromiseId = self.twin.thenScriptOn(
+            destChain,
+            self.currentPromiseId,
+            script,
             selector
         );
         return self;
@@ -85,6 +124,24 @@ library TwinChain {
         return self;
     }
 
+    /// @notice Add a .catchErrorScript() callback executed via delegatecall in the twin.
+    /// @param self The current chain state
+    /// @param script The script contract address to delegatecall
+    /// @param selector The script selector to invoke
+    /// @return The updated chain with new promise ID
+    function catchErrorScript(
+        Chain memory self,
+        address script,
+        bytes4 selector
+    ) internal returns (Chain memory) {
+        self.currentPromiseId = self.twin.catchErrorScript(
+            self.currentPromiseId,
+            script,
+            selector
+        );
+        return self;
+    }
+
     /// @notice Add a .catchError() callback on a destination chain
     /// @param self The current chain state
     /// @param destChain The destination chain ID
@@ -101,6 +158,27 @@ library TwinChain {
             destChain,
             self.currentPromiseId,
             target,
+            selector
+        );
+        return self;
+    }
+
+    /// @notice Add a .catchErrorScriptOn() callback executed via delegatecall in the twin.
+    /// @param self The current chain state
+    /// @param destChain The destination chain ID
+    /// @param script The script contract address to delegatecall
+    /// @param selector The script selector to invoke
+    /// @return The updated chain with new promise ID
+    function catchErrorScriptOn(
+        Chain memory self,
+        uint256 destChain,
+        address script,
+        bytes4 selector
+    ) internal returns (Chain memory) {
+        self.currentPromiseId = self.twin.catchErrorScriptOn(
+            destChain,
+            self.currentPromiseId,
+            script,
             selector
         );
         return self;

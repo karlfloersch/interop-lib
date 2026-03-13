@@ -14,6 +14,7 @@ contract Twin {
     struct DispatchInfo {
         address target;
         bytes4 selector;
+        bool delegateScript;
     }
 
     /// @notice The chain where the owner originally created their twin
@@ -154,10 +155,20 @@ contract Twin {
         onlyOwner
         returns (bytes32 callbackPromiseId)
     {
-        callbackPromiseId = callbackContract.then(
-            parentPromiseId, address(this), this.executeCallback.selector
-        );
-        dispatches[callbackPromiseId] = DispatchInfo(target, selector);
+        callbackPromiseId = _registerCallback(parentPromiseId, target, selector, false, false);
+    }
+
+    /// @notice Register a same-chain .then() callback script executed via delegatecall.
+    /// @param parentPromiseId The promise to watch
+    /// @param script The script contract to delegatecall when the callback fires
+    /// @param selector The script selector to invoke with the parent return data
+    /// @return callbackPromiseId The callback promise ID
+    function thenScript(bytes32 parentPromiseId, address script, bytes4 selector)
+        external
+        onlyOwner
+        returns (bytes32 callbackPromiseId)
+    {
+        callbackPromiseId = _registerCallback(parentPromiseId, script, selector, true, false);
     }
 
     /// @notice Register a cross-chain .then() callback routed through this twin
@@ -171,16 +182,23 @@ contract Twin {
         onlyOwner
         returns (bytes32 callbackPromiseId)
     {
-        callbackPromiseId = callbackContract.thenOn(
-            destChain, parentPromiseId, address(this), this.executeCallback.selector
-        );
+        callbackPromiseId =
+            _registerCrossChainCallback(destChain, parentPromiseId, target, selector, false, false);
+    }
 
-        // Send dispatch info to twin on dest chain
-        messenger.sendMessage(
-            destChain,
-            address(this),
-            abi.encodeCall(this.receiveDispatchInfo, (callbackPromiseId, target, selector))
-        );
+    /// @notice Register a cross-chain .then() callback script executed via delegatecall.
+    /// @param destChain The destination chain where the callback should execute
+    /// @param parentPromiseId The promise to watch
+    /// @param script The script contract to delegatecall when the callback fires
+    /// @param selector The script selector to invoke with the parent return data
+    /// @return callbackPromiseId The callback promise ID
+    function thenScriptOn(uint256 destChain, bytes32 parentPromiseId, address script, bytes4 selector)
+        external
+        onlyOwner
+        returns (bytes32 callbackPromiseId)
+    {
+        callbackPromiseId =
+            _registerCrossChainCallback(destChain, parentPromiseId, script, selector, true, false);
     }
 
     /// @notice Register a same-chain .catchError() callback routed through this twin
@@ -193,10 +211,20 @@ contract Twin {
         onlyOwner
         returns (bytes32 callbackPromiseId)
     {
-        callbackPromiseId = callbackContract.catchError(
-            parentPromiseId, address(this), this.executeCallback.selector
-        );
-        dispatches[callbackPromiseId] = DispatchInfo(target, selector);
+        callbackPromiseId = _registerCallback(parentPromiseId, target, selector, false, true);
+    }
+
+    /// @notice Register a same-chain .catchError() callback script executed via delegatecall.
+    /// @param parentPromiseId The promise to watch
+    /// @param script The script contract to delegatecall when the callback fires
+    /// @param selector The script selector to invoke with the parent return data
+    /// @return callbackPromiseId The callback promise ID
+    function catchErrorScript(bytes32 parentPromiseId, address script, bytes4 selector)
+        external
+        onlyOwner
+        returns (bytes32 callbackPromiseId)
+    {
+        callbackPromiseId = _registerCallback(parentPromiseId, script, selector, true, true);
     }
 
     /// @notice Register a cross-chain .catchError() callback routed through this twin
@@ -210,15 +238,24 @@ contract Twin {
         onlyOwner
         returns (bytes32 callbackPromiseId)
     {
-        callbackPromiseId = callbackContract.catchErrorOn(
-            destChain, parentPromiseId, address(this), this.executeCallback.selector
-        );
+        callbackPromiseId =
+            _registerCrossChainCallback(destChain, parentPromiseId, target, selector, false, true);
+    }
 
-        messenger.sendMessage(
-            destChain,
-            address(this),
-            abi.encodeCall(this.receiveDispatchInfo, (callbackPromiseId, target, selector))
-        );
+    /// @notice Register a cross-chain .catchError() callback script executed via delegatecall.
+    /// @param destChain The destination chain where the callback should execute
+    /// @param parentPromiseId The promise to watch
+    /// @param script The script contract to delegatecall when the callback fires
+    /// @param selector The script selector to invoke with the parent return data
+    /// @return callbackPromiseId The callback promise ID
+    function catchErrorScriptOn(
+        uint256 destChain,
+        bytes32 parentPromiseId,
+        address script,
+        bytes4 selector
+    ) external onlyOwner returns (bytes32 callbackPromiseId) {
+        callbackPromiseId =
+            _registerCrossChainCallback(destChain, parentPromiseId, script, selector, true, true);
     }
 
     // ─── Callback Execution ────────────────────────────────────────────
@@ -234,9 +271,9 @@ contract Twin {
 
         delete dispatches[cbPromiseId];
 
-        (bool success, bytes memory result) = info.target.call(
-            abi.encodeWithSelector(info.selector, parentReturnData)
-        );
+        (bool success, bytes memory result) = info.delegateScript
+            ? info.target.delegatecall(abi.encodeWithSelector(info.selector, parentReturnData))
+            : info.target.call(abi.encodeWithSelector(info.selector, parentReturnData));
 
         // Pass through raw return/revert data for transparent proxying
         assembly {
@@ -250,11 +287,16 @@ contract Twin {
     /// @param callbackPromiseId The callback promise this dispatch is for
     /// @param target The real target to call
     /// @param selector The real selector to call
-    function receiveDispatchInfo(bytes32 callbackPromiseId, address target, bytes4 selector)
+    function receiveDispatchInfo(
+        bytes32 callbackPromiseId,
+        address target,
+        bytes4 selector,
+        bool delegateScript
+    )
         external
         onlyCrossDomainTwin
     {
-        dispatches[callbackPromiseId] = DispatchInfo(target, selector);
+        dispatches[callbackPromiseId] = DispatchInfo(target, selector, delegateScript);
     }
 
     // ─── Script & Direct Execution ─────────────────────────────────────
@@ -308,5 +350,43 @@ contract Twin {
         }
 
         return false;
+    }
+
+    function _registerCallback(
+        bytes32 parentPromiseId,
+        address target,
+        bytes4 selector,
+        bool delegateScript,
+        bool isCatch
+    ) internal returns (bytes32 callbackPromiseId) {
+        callbackPromiseId = isCatch
+            ? callbackContract.catchError(parentPromiseId, address(this), this.executeCallback.selector)
+            : callbackContract.then(parentPromiseId, address(this), this.executeCallback.selector);
+        dispatches[callbackPromiseId] = DispatchInfo(target, selector, delegateScript);
+    }
+
+    function _registerCrossChainCallback(
+        uint256 destChain,
+        bytes32 parentPromiseId,
+        address target,
+        bytes4 selector,
+        bool delegateScript,
+        bool isCatch
+    ) internal returns (bytes32 callbackPromiseId) {
+        callbackPromiseId = isCatch
+            ? callbackContract.catchErrorOn(
+                destChain, parentPromiseId, address(this), this.executeCallback.selector
+            )
+            : callbackContract.thenOn(
+                destChain, parentPromiseId, address(this), this.executeCallback.selector
+            );
+
+        messenger.sendMessage(
+            destChain,
+            address(this),
+            abi.encodeCall(
+                this.receiveDispatchInfo, (callbackPromiseId, target, selector, delegateScript)
+            )
+        );
     }
 }

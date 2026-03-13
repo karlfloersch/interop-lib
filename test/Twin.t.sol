@@ -189,6 +189,31 @@ contract TwinTest is Test {
         assertTrue(target.errorHandled());
     }
 
+    function test_thenScriptCallbackCanContinueAsTwin() public {
+        TwinTarget parentTarget = new TwinTarget();
+        TwinTarget nestedTarget = new TwinTarget();
+        ThenScript callbackScript = new ThenScript(nestedTarget);
+
+        vm.prank(alice);
+        TwinChain.Chain memory chain = aliceTwin.makeCall(
+            address(parentTarget),
+            abi.encodeCall(parentTarget.doSomething, (21))
+        );
+
+        vm.prank(alice);
+        bytes32 cbPromiseId = aliceTwin.thenScript(
+            chain.currentPromiseId,
+            address(callbackScript),
+            callbackScript.run.selector
+        );
+
+        callbackContract.resolve(cbPromiseId);
+
+        assertTrue(nestedTarget.called());
+        assertEq(nestedTarget.lastCaller(), address(aliceTwin));
+        assertEq(nestedTarget.lastValue(), 43);
+    }
+
     // ─── Auth ──────────────────────────────────────────────────────────
 
     function test_thenOnlyOwner() public {
@@ -365,6 +390,16 @@ contract TwinTest is Test {
         vm.expectRevert(TwinFactory.RouterAlreadySet.selector);
         f2.setRouter(address(0x888));
     }
+
+    function test_factorySetRouterOnlyOwner() public {
+        TwinFactory f2 = new TwinFactory(
+            address(callbackContract), address(promiseContract), address(0)
+        );
+
+        vm.prank(bob);
+        vm.expectRevert(TwinFactory.NotOwner.selector);
+        f2.setRouter(address(0x999));
+    }
 }
 
 // ─── Helper Contracts ──────────────────────────────────────────────────
@@ -420,5 +455,21 @@ contract TestScript is IScript {
         // In delegatecall context, address(this) == twin
         Twin twin = Twin(address(this));
         twin.execute(address(target), abi.encodeCall(target.doSomething, (value)));
+    }
+}
+
+contract ThenScript {
+    TwinTarget public immutable target;
+
+    constructor(TwinTarget _target) {
+        target = _target;
+    }
+
+    function run(bytes memory parentReturnData) external {
+        uint256 value = abi.decode(parentReturnData, (uint256));
+        Twin(address(this)).execute(
+            address(target),
+            abi.encodeCall(target.doSomething, (value + 1))
+        );
     }
 }

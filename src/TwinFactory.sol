@@ -13,6 +13,7 @@ contract TwinFactory {
     Callback public immutable callbackContract;
     Promise public immutable promiseContract;
     IL2ToL2CrossDomainMessenger public immutable messenger;
+    address public immutable owner;
 
     /// @notice The TwinRouter address (set once after deployment)
     address public router;
@@ -24,16 +25,19 @@ contract TwinFactory {
     event RouterSet(address router);
 
     error RouterAlreadySet();
+    error NotOwner();
 
     constructor(address _callbackContract, address _promiseContract, address _messenger) {
         callbackContract = Callback(_callbackContract);
         promiseContract = Promise(_promiseContract);
         messenger = IL2ToL2CrossDomainMessenger(_messenger);
+        owner = msg.sender;
     }
 
     /// @notice Set the router address (can only be called once)
     /// @param _router The TwinRouter contract address
     function setRouter(address _router) external {
+        if (msg.sender != owner) revert NotOwner();
         if (router != address(0)) revert RouterAlreadySet();
         router = _router;
         emit RouterSet(_router);

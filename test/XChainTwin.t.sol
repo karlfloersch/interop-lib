@@ -242,9 +242,61 @@ contract XChainTwinTest is Test, Relayer {
 
         // Check dispatch info on Chain B
         vm.selectFork(forkIds[1]);
-        (address dispTarget, bytes4 dispSelector) = aliceTwinB.dispatches(cbPromiseId);
+        (address dispTarget, bytes4 dispSelector, bool delegateScript) =
+            aliceTwinB.dispatches(cbPromiseId);
         assertEq(dispTarget, address(targetB), "Dispatch target should match");
         assertEq(dispSelector, targetB.handleCallback.selector, "Dispatch selector should match");
+        assertFalse(delegateScript, "Plain callbacks should not delegatecall");
+    }
+
+    /// @notice thenScriptOn executes a delegatecall script in the destination twin context
+    function test_thenScriptOnCanContinueAsTwin() public {
+        vm.selectFork(forkIds[0]);
+        XChainTarget parentTarget = new XChainTarget{salt: bytes32(uint256(11))}();
+        XChainTarget nestedTargetA = new XChainTarget{salt: bytes32(uint256(12))}();
+        XChainThenScript callbackScriptA = new XChainThenScript{salt: bytes32(uint256(13))}(
+            nestedTargetA
+        );
+
+        vm.selectFork(forkIds[1]);
+        XChainTarget nestedTargetB = new XChainTarget{salt: bytes32(uint256(12))}();
+        XChainThenScript callbackScriptB = new XChainThenScript{salt: bytes32(uint256(13))}(
+            nestedTargetB
+        );
+
+        require(address(callbackScriptA) == address(callbackScriptB), "Script addresses differ");
+        require(address(nestedTargetA) == address(nestedTargetB), "Target addresses differ");
+
+        vm.selectFork(forkIds[0]);
+        uint256 chainBId = chainIdByForkId[forkIds[1]];
+
+        vm.prank(alice);
+        TwinChain.Chain memory chain = aliceTwinA.makeCall(
+            address(parentTarget),
+            abi.encodeCall(parentTarget.doSomething, (33))
+        );
+
+        vm.prank(alice);
+        bytes32 cbPromiseId = aliceTwinA.thenScriptOn(
+            chainBId,
+            chain.currentPromiseId,
+            address(callbackScriptA),
+            callbackScriptA.run.selector
+        );
+
+        relayAllMessages();
+
+        vm.selectFork(forkIds[0]);
+        promiseA.shareResolvedPromise(chainBId, chain.currentPromiseId);
+        relayAllMessages();
+
+        vm.selectFork(forkIds[1]);
+        assertTrue(callbackB.canResolve(cbPromiseId), "Script callback should be resolvable");
+        callbackB.resolve(cbPromiseId);
+
+        assertTrue(nestedTargetB.called(), "Nested target should have been called");
+        assertEq(nestedTargetB.lastCaller(), address(aliceTwinB), "Nested call should come from twin");
+        assertEq(nestedTargetB.lastValue(), 66, "Script should decode and reuse the parent result");
     }
 
     /// @notice catchErrorOn works cross-chain
@@ -522,5 +574,21 @@ contract XChainTarget {
 
     function alwaysFails() external pure {
         revert("always fails");
+    }
+}
+
+contract XChainThenScript {
+    XChainTarget public immutable target;
+
+    constructor(XChainTarget _target) {
+        target = _target;
+    }
+
+    function run(bytes memory parentReturnData) external {
+        uint256 value = abi.decode(parentReturnData, (uint256));
+        Twin(address(this)).execute(
+            address(target),
+            abi.encodeCall(target.doSomething, (value))
+        );
     }
 }

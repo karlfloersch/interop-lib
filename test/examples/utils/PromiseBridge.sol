@@ -152,10 +152,10 @@ contract PromiseBridge {
             success = true;
         } catch Error(string memory reason) {
             emit TokensMinted(token, recipient, 0, sourceChain, 0); // Emit failed mint for debugging
-            success = false;
+            revert InvalidBridgeOperation(reason);
         } catch {
             emit TokensMinted(token, recipient, 0, sourceChain, 0); // Emit failed mint for debugging  
-            success = false;
+            revert InvalidBridgeOperation("Mint failed");
         }
         
         return success;
