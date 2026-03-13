@@ -14,11 +14,21 @@ This library provides a comprehensive promise-based system for handling asynchro
 ### Core Contracts
 
 - **Promise.sol** - Base promise contract managing promise lifecycle, state, and cross-chain sharing
-- **SetTimeout.sol** - Time-based promises that resolve after specified timestamps  
+- **SetTimeout.sol** - Time-based promises that resolve after specified timestamps
 - **Callback.sol** - Promise chaining with `.then()` and `.catchError()` callbacks, including cross-chain callback registration
 - **PromiseAll.sol** - Promise aggregation that resolves when all constituent promises succeed
 - **PromiseChain.sol** - Fluent builder for JS-like promise chaining syntax (`.from().then().catchError().build()`)
 - **PromiseUtils.sol** - Variadic helpers for `PromiseAll` (avoid manual array construction)
+
+### Twin System — Consistent Identity Across Chains
+
+The Twin system gives users a single deterministic address (`msg.sender`) that is the same on every chain. When a callback fires, the target contract sees `msg.sender == twin` instead of the Callback contract.
+
+- **Twin.sol** - User's cross-chain agent. Wraps Callback to route calls through the twin so targets always see `msg.sender == twin`. Supports `makeCall` (local), `makeCallOn` (cross-chain), `.then()`, `.thenOn()`, `.catchError()`, `.catchErrorOn()`, and direct `execute`.
+- **TwinFactory.sol** - CREATE2 factory for deterministic twin deployment. Same factory address on all chains → same twin address everywhere.
+- **TwinRouter.sol** - User entry point. Deploys the user's twin (if needed) and delegatecalls a script into it.
+- **TwinChain.sol** - Fluent builder routed through a Twin. `twin.makeCallOn(...).thenOn(...).build()`.
+- **IScript.sol** - Interface for script contracts that run inside a Twin via delegatecall.
 
 ### Cross-Chain Capabilities
 
@@ -156,6 +166,64 @@ bytes32 allId = PromiseUtils.all(promiseAll, p1, p2);
 bytes32 allId = PromiseUtils.all(promiseAll, p1, p2, p3);
 bytes32 allId = PromiseUtils.all(promiseAll, p1, p2, p3, p4);
 ```
+
+### Twin — Consistent `msg.sender` Across Chains
+
+The Twin system wraps the promise/callback system so that `msg.sender` at every target is the user's deterministic twin address, not the Callback contract.
+
+**Quick start — via Router + Script:**
+
+```solidity
+// 1. Write a stateless script
+contract SwapAndDeposit is IScript {
+    using TwinChain for TwinChain.Chain;
+
+    uint256 immutable chainB;
+    address immutable dex;
+    address immutable lending;
+
+    constructor(uint256 _chainB, address _dex, address _lending) {
+        chainB = _chainB; dex = _dex; lending = _lending;
+    }
+
+    function run() external {
+        Twin twin = Twin(address(this)); // delegatecall context
+        twin.makeCallOn(chainB, dex, abi.encodeCall(IDex.swap, (token1, token2, amt)))
+            .then(lending, ILending.deposit.selector)
+            .build();
+    }
+}
+
+// 2. Execute it — one transaction does everything
+TwinRouter(router).execute(address(myScript));
+// → Router deploys twin if needed
+// → Twin delegatecalls script.run()
+// → Script sets up full promise chain as the twin
+```
+
+**Direct usage (without Router/Script):**
+
+```solidity
+using TwinChain for TwinChain.Chain;
+
+// Same-chain: execute + create promise + chain callbacks
+twin.makeCall(target, data)
+    .then(handler, handler.onResult.selector)
+    .catchError(fallback, fallback.onError.selector)
+    .build();
+
+// Cross-chain: call on chain B, then handle result on chain C
+twin.makeCallOn(chainB, dex, abi.encodeCall(dex.swap, (t1, t2, amt)))
+    .thenOn(chainC, lending, lending.deposit.selector)
+    .build();
+```
+
+**How it works:**
+
+1. `makeCallOn(chainB, dex, data)` → creates promise P1, sends cross-chain message to twin on chain B
+2. Twin on chain B: calls `dex.swap(...)` (msg.sender == twin), resolves P1, shares back to chain A
+3. `.then(handler, sel)` → registers callback on P1 via Callback contract, but with twin as the target
+4. When P1 resolves: Callback calls `twin.executeCallback(data)` → twin calls `handler.onResult(data)` (msg.sender == twin)
 
 ### Remote Promise Callbacks
 
@@ -388,17 +456,21 @@ The system uses hash-based global promise IDs generated from `keccak256(abi.enco
 
 ## Testing
 
-The library includes comprehensive test coverage:
+Cross-chain tests require [supersim](https://github.com/ethereum-optimism/supersim) running locally:
 
-- **Local tests** covering core promise functionality
-- **Cross-chain tests** demonstrating multi-chain coordination
-- **End-to-end tests** showing complete realistic workflows
-- Error handling, edge cases, and complex orchestration scenarios
-
-Run tests with:
 ```bash
-forge test                    # All tests
-forge test --match-path "test/XChain*.sol"  # Cross-chain tests only
+# Build and run supersim (provides two L2 chains on ports 9545 and 9546)
+cd /path/to/supersim && go build -o supersim cmd/main.go
+./supersim
+```
+
+Then run tests:
+
+```bash
+forge test                                        # All tests
+forge test --match-path "test/Twin.t.sol"         # Twin single-chain tests
+forge test --match-path "test/XChainTwin.t.sol"   # Twin cross-chain tests
+forge test --match-path "test/XChain*.sol"        # All cross-chain tests
 ```
 
 ## Architecture

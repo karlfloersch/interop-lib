@@ -45,8 +45,8 @@ contract SwapBridgeSwapExampleTest is Test, Relayer {
     bytes32 public rollbackCallbackId;
 
     string[] private rpcUrls = [
-        vm.envOr("CHAIN_A_RPC_URL", string("https://interop-alpha-0.optimism.io")),
-        vm.envOr("CHAIN_B_RPC_URL", string("https://interop-alpha-1.optimism.io"))
+        vm.envOr("CHAIN_A_RPC_URL", string("http://127.0.0.1:9545")),
+        vm.envOr("CHAIN_B_RPC_URL", string("http://127.0.0.1:9546"))
     ];
 
     constructor() Relayer(rpcUrls) {}

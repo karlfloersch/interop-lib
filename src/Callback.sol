@@ -26,6 +26,9 @@ contract Callback is IResolvable {
     /// @notice Current callback context - which chain the currently executing callback was registered from
     uint256 internal currentCallbackSourceChain;
 
+    /// @notice Current callback context - the promise ID of the currently executing callback
+    bytes32 internal currentCallbackPromiseId;
+
     /// @notice Callback types for handling different promise states
     enum CallbackType {
         Then,   // Executes when parent promise resolves
@@ -237,6 +240,17 @@ contract Callback is IResolvable {
         return (currentCallbackRegistrant, currentCallbackSourceChain);
     }
 
+    /// @notice Get the promise ID of the currently executing callback
+    /// @dev Will revert if no callback is currently being executed
+    /// @return The promise ID of the currently executing callback
+    function callbackPromiseId() external view returns (bytes32) {
+        require(
+            currentCallbackRegistrant != DEFAULT_CALLBACK_REGISTRANT,
+            "Callback: no callback currently executing"
+        );
+        return currentCallbackPromiseId;
+    }
+
     /// @notice Resolve a callback promise by executing the callback if conditions are met
     /// @param callbackPromiseId The ID of the callback promise to resolve
     function resolve(bytes32 callbackPromiseId) external {
@@ -281,6 +295,7 @@ contract Callback is IResolvable {
         // Set callback context before execution
         currentCallbackRegistrant = callbackData.registrant;
         currentCallbackSourceChain = callbackData.sourceChain;
+        currentCallbackPromiseId = callbackPromiseId;
         
         // Execute the callback
         (bool success, bytes memory returnData) = callbackData.target.call(
@@ -290,6 +305,7 @@ contract Callback is IResolvable {
         // Clear callback context after execution
         currentCallbackRegistrant = DEFAULT_CALLBACK_REGISTRANT;
         currentCallbackSourceChain = 0;
+        currentCallbackPromiseId = bytes32(0);
         
         if (success) {
             // Resolve the callback promise with the return value from the callback
