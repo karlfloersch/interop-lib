@@ -24,10 +24,10 @@ This library provides a comprehensive promise-based system for handling asynchro
 
 The Twin system gives users a single deterministic address (`msg.sender`) that is the same on every chain. When a callback fires, the target contract sees `msg.sender == twin` instead of the Callback contract.
 
-- **Twin.sol** - User's cross-chain agent. Wraps Callback to route calls through the twin so targets always see `msg.sender == twin`. Supports `makeCall` (local), `makeCallOn` (cross-chain), `.then()`, `.thenOn()`, `.catchError()`, `.catchErrorOn()`, and direct `execute`.
-- **TwinFactory.sol** - CREATE2 factory for deterministic twin deployment. Same factory address on all chains → same twin address everywhere.
+- **Twin.sol** - User's cross-chain agent. Wraps Callback to route calls through the twin so targets always see `msg.sender == twin`. Supports `makeCall` (local), `makeCallOn` (cross-chain), `.then()`, `.thenOn()`, `.catchError()`, `.catchErrorOn()`, callback scripts (`.thenScript*` / `.catchErrorScript*`), and direct `execute`.
+- **TwinFactory.sol** - CREATE2 factory for deterministic twin deployment. Same factory address on all chains → same twin address everywhere. The router is set once by the factory owner.
 - **TwinRouter.sol** - User entry point. Deploys the user's twin (if needed) and delegatecalls a script into it.
-- **TwinChain.sol** - Fluent builder routed through a Twin. `twin.makeCallOn(...).thenOn(...).build()`.
+- **TwinChain.sol** - Fluent builder routed through a Twin. Supports normal callbacks and delegatecall callback scripts.
 - **IScript.sol** - Interface for script contracts that run inside a Twin via delegatecall.
 
 ### Cross-Chain Capabilities
@@ -135,8 +135,12 @@ bytes32 finalId = PromiseChain
 | `from(cb, promiseId)` | Start a chain from an existing promise |
 | `.then(target, selector)` | Success callback on the same chain |
 | `.thenOn(destChain, target, selector)` | Success callback on a different chain |
+| `.thenScript(script, selector)` | Success callback script executed via `delegatecall` in the twin |
+| `.thenScriptOn(destChain, script, selector)` | Cross-chain success callback script executed in the destination twin |
 | `.catchError(target, selector)` | Error callback on the same chain |
 | `.catchErrorOn(destChain, target, selector)` | Error callback on a different chain |
+| `.catchErrorScript(script, selector)` | Error callback script executed via `delegatecall` in the twin |
+| `.catchErrorScriptOn(destChain, script, selector)` | Cross-chain error callback script executed in the destination twin |
 | `.fork()` | Branch the chain — both branches start from the same promise |
 | `.build()` / `.current()` | Extract the final promise ID |
 
@@ -170,6 +174,13 @@ bytes32 allId = PromiseUtils.all(promiseAll, p1, p2, p3, p4);
 ### Twin — Consistent `msg.sender` Across Chains
 
 The Twin system wraps the promise/callback system so that `msg.sender` at every target is the user's deterministic twin address, not the Callback contract.
+
+Use normal callbacks when the next step is just "call this target with the parent return data". Use callback scripts when the next step needs to keep orchestrating as the twin, for example:
+
+- decoding callback data
+- approving tokens
+- starting another bridge or swap
+- branching into a rollback path
 
 **Quick start — via Router + Script:**
 
@@ -216,6 +227,11 @@ twin.makeCall(target, data)
 twin.makeCallOn(chainB, dex, abi.encodeCall(dex.swap, (t1, t2, amt)))
     .thenOn(chainC, lending, lending.deposit.selector)
     .build();
+
+// Continue orchestration inside the twin with a callback script
+twin.makeCall(exchange, abi.encodeCall(exchange.swap, (tokenA, tokenB, amountIn)))
+    .thenScript(afterSwapScript, AfterSwapScript.run.selector)
+    .build();
 ```
 
 **How it works:**
@@ -223,7 +239,82 @@ twin.makeCallOn(chainB, dex, abi.encodeCall(dex.swap, (t1, t2, amt)))
 1. `makeCallOn(chainB, dex, data)` → creates promise P1, sends cross-chain message to twin on chain B
 2. Twin on chain B: calls `dex.swap(...)` (msg.sender == twin), resolves P1, shares back to chain A
 3. `.then(handler, sel)` → registers callback on P1 via Callback contract, but with twin as the target
-4. When P1 resolves: Callback calls `twin.executeCallback(data)` → twin calls `handler.onResult(data)` (msg.sender == twin)
+4. When P1 resolves: Callback calls `twin.executeCallback(data)`
+5. Twin dispatches either:
+   - `target.call(...)` for normal callbacks, so the target sees `msg.sender == twin`
+   - `script.delegatecall(...)` for callback scripts, so the script can keep executing as the twin
+
+### Twin Callback Scripts
+
+Callback scripts solve the main gap in multi-step workflows: a callback often needs to do more than just forward data to a target. It may need to approve tokens, start a bridge, register another callback, or create a rollback branch.
+
+Example:
+
+```solidity
+contract AfterSwapScript {
+    using TwinChain for TwinChain.Chain;
+
+    address immutable tokenB;
+    address immutable bridge;
+    address immutable nextScript;
+    uint256 immutable destinationChain;
+
+    function run(bytes memory parentReturnData) external {
+        Twin twin = Twin(address(this));
+        uint256 amountOut = abi.decode(parentReturnData, (uint256));
+
+        twin.execute(tokenB, abi.encodeCall(IERC20.approve, (bridge, amountOut)));
+
+        bytes memory bridgeResult = twin.execute(
+            bridge,
+            abi.encodeCall(PromiseBridge.bridgeTokens, (tokenB, amountOut, destinationChain, address(this)))
+        );
+
+        (, bytes32 bridgeMintCallbackId) = abi.decode(bridgeResult, (bytes32, bytes32));
+
+        TwinChain.from(twin, bridgeMintCallbackId)
+            .thenScriptOn(destinationChain, nextScript, DestinationSwapScript.run.selector)
+            .build();
+    }
+}
+```
+
+This is the pattern to use when a callback needs to continue the promise chain as the same twin on the same or a remote chain.
+
+### Example: Swap -> Bridge -> Swap With Bridge-Back Rollback
+
+The isolated Twin-based example lives in `test/examples/TwinSwapBridgeSwapExample.t.sol`.
+
+Success path:
+
+1. On chain A, the twin swaps `tokenA -> tokenB`
+2. A callback script bridges `tokenB` to chain B
+3. A destination callback script swaps `tokenB -> tokenC` on chain B
+
+Rollback path:
+
+1. The destination swap is wrapped in a promise created by the twin
+2. A forked `.catchErrorScript(...)` branch is registered against that swap
+3. If the second swap reverts, the rollback script bridges `tokenB` back to chain A
+
+Core shape:
+
+```solidity
+twin.makeCall(exchange, abi.encodeCall(MockExchange.swap, (tokenA, tokenB, amountIn)))
+    .thenScript(afterLocalSwapScript, AfterLocalSwapScript.run.selector)
+    .build();
+```
+
+Inside the destination script:
+
+```solidity
+twin.makeCall(exchange, abi.encodeCall(MockExchange.swap, (tokenB, tokenC, amountIn)))
+    .fork()
+    .catchErrorScript(rollbackScript, RollbackBridgeBackScript.run.selector)
+    .build();
+```
+
+Important behavior: callback branches only enter the error path when the callback actually reverts. Returning `false` is still a successful resolution from the promise system's perspective.
 
 ### Remote Promise Callbacks
 
@@ -470,6 +561,7 @@ Then run tests:
 forge test                                        # All tests
 forge test --match-path "test/Twin.t.sol"         # Twin single-chain tests
 forge test --match-path "test/XChainTwin.t.sol"   # Twin cross-chain tests
+forge test --match-path "test/examples/TwinSwapBridgeSwapExample.t.sol" # Twin rollback example
 forge test --match-path "test/XChain*.sol"        # All cross-chain tests
 ```
 
